@@ -24,3 +24,435 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+.room-page {
+  position: relative;
+  isolation: isolate;
+  min-height: 100vh;
+  overflow: hidden;
+
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding: 88px 24px;
+
+  background:
+    radial-gradient(circle at 15% 15%, #f3efff 0, transparent 32%),
+    radial-gradient(circle at 85% 75%, #e7fff4 0, transparent 30%),
+    linear-gradient(145deg, #edf5ff 0%, #f7f4ff 50%, #eef9ff 100%);
+}
+
+.planning-background {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+}
+
+/* Soft colored atmosphere */
+
+.aurora {
+  position: absolute;
+  width: 520px;
+  height: 520px;
+  border-radius: 50%;
+  filter: blur(90px);
+  opacity: 0.28;
+  animation: drift 16s ease-in-out infinite alternate;
+}
+
+.aurora-blue {
+  top: -220px;
+  left: -100px;
+  background: #9ac9ff;
+}
+
+.aurora-purple {
+  top: 22%;
+  right: -240px;
+  background: #c7a7ff;
+  animation-delay: -5s;
+}
+
+.aurora-green {
+  bottom: -280px;
+  left: 35%;
+  background: #9ce8d0;
+  animation-delay: -10s;
+}
+
+/* Paths between private agents */
+
+.connection-map {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.connection-map path {
+  fill: none;
+  stroke: #8d75d6;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-dasharray: 3 11;
+  opacity: 0.22;
+  animation: move-path 18s linear infinite;
+}
+
+/* Participant/agent nodes */
+
+.agent {
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  border: 3px solid rgb(255 255 255 / 80%);
+  border-radius: 50%;
+  background: #8c7bea;
+  box-shadow:
+    0 0 0 7px rgb(140 123 234 / 10%),
+    0 0 28px rgb(140 123 234 / 45%);
+  animation: float-agent 5s ease-in-out infinite;
+}
+
+.agent-one {
+  top: 19%;
+  left: 8%;
+}
+
+.agent-two {
+  top: 16%;
+  right: 8%;
+  background: #52bfa0;
+  animation-delay: -1s;
+}
+
+.agent-three {
+  bottom: 20%;
+  left: 6%;
+  background: #65a4e8;
+  animation-delay: -2.5s;
+}
+
+.agent-four {
+  right: 6%;
+  bottom: 18%;
+  background: #dc8ac7;
+  animation-delay: -3.5s;
+}
+
+.agent-five {
+  left: 19%;
+  bottom: 8%;
+  width: 8px;
+  height: 8px;
+  animation-delay: -4s;
+}
+
+/* Make the existing card feel integrated */
+
+.room-card {
+  position: relative;
+  z-index: 1;
+
+  width: min(820px, 100%);
+  padding: 40px;
+  box-sizing: border-box;
+
+  background:
+    radial-gradient(
+      circle at 12% 5%,
+      rgb(255 255 255 / 55%),
+      transparent 38%
+    ),
+    linear-gradient(
+      135deg,
+      #e8c7fa 0%,
+      #dfd4ff 45%,
+      #cbeaff 100%
+    );
+
+  border: 1px solid rgb(255 255 255 / 80%);
+  border-radius: 22px;
+
+  box-shadow:
+    0 24px 70px rgb(50 70 110 / 15%),
+    0 2px 6px rgb(50 70 110 / 8%);
+}
+
+/* Animation */
+
+@keyframes drift {
+  from {
+    transform: translate3d(-20px, -10px, 0) scale(1);
+  }
+
+  to {
+    transform: translate3d(35px, 25px, 0) scale(1.12);
+  }
+}
+
+@keyframes move-path {
+  to {
+    stroke-dashoffset: -140;
+  }
+}
+
+@keyframes float-agent {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+
+  50% {
+    transform: translateY(-8px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .aurora,
+  .agent,
+  .connection-map path {
+    animation: none;
+  }
+}
+
+
+/* Home page using the same background language */
+
+.home-page {
+  position: relative;
+  isolation: isolate;
+  min-height: 100vh;
+  overflow: hidden;
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 48px 24px;
+
+  background:
+    radial-gradient(circle at 15% 15%, #f3efff 0, transparent 32%),
+    radial-gradient(circle at 85% 75%, #e7fff4 0, transparent 30%),
+    linear-gradient(145deg, #edf5ff 0%, #f7f4ff 50%, #eef9ff 100%);
+}
+
+/* Main home card */
+
+.home-card {
+  position: relative;
+  z-index: 1;
+  width: min(540px, 100%);
+  overflow: hidden;
+  padding: 42px;
+
+  background:
+    radial-gradient(
+      circle at 8% 0%,
+      rgb(255 255 255 / 85%),
+      transparent 42%
+    ),
+    linear-gradient(
+      145deg,
+      rgb(250 246 255 / 94%) 0%,
+      rgb(241 238 255 / 94%) 48%,
+      rgb(232 248 255 / 94%) 100%
+    );
+
+  border: 1px solid rgb(255 255 255 / 90%);
+  border-radius: 28px;
+  box-shadow:
+    0 32px 90px rgb(74 67 125 / 16%),
+    0 8px 24px rgb(74 67 125 / 8%),
+    inset 0 1px 0 rgb(255 255 255 / 90%);
+
+  backdrop-filter: blur(24px);
+}
+
+/* Colored highlight along the card top */
+
+.home-card::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 12%;
+  width: 76%;
+  height: 3px;
+  border-radius: 0 0 999px 999px;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    #a78bfa,
+    #60a5fa,
+    #5eead4,
+    transparent
+  );
+}
+
+.home-card-glow {
+  position: absolute;
+  top: -150px;
+  right: -130px;
+  width: 300px;
+  height: 300px;
+  border-radius: 50%;
+  background: rgb(167 139 250 / 18%);
+  filter: blur(50px);
+  pointer-events: none;
+}
+
+/* Privacy label */
+
+.privacy-badge {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 20px;
+  padding: 7px 12px;
+
+  color: #6653a7;
+  background: rgb(255 255 255 / 64%);
+  border: 1px solid rgb(139 119 210 / 20%);
+  border-radius: 999px;
+
+  font-size: 12px;
+  font-weight: 650;
+  letter-spacing: 0.02em;
+}
+
+.privacy-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #5ccba5;
+  box-shadow: 0 0 0 4px rgb(92 203 165 / 14%);
+}
+
+/* Small agent-to-council diagram */
+
+.privacy-flow {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 2px 0 28px;
+}
+
+.mini-agent {
+  width: 12px;
+  height: 12px;
+  border: 3px solid rgb(255 255 255 / 90%);
+  border-radius: 50%;
+}
+
+.mini-agent-purple {
+  background: #967bea;
+  box-shadow: 0 0 0 6px rgb(150 123 234 / 12%);
+}
+
+.mini-agent-green {
+  background: #52bfa0;
+  box-shadow: 0 0 0 6px rgb(82 191 160 / 12%);
+}
+
+.flow-line {
+  width: 70px;
+  margin: 0 10px;
+  border-top: 1.5px dashed rgb(123 105 190 / 35%);
+}
+
+.council-node {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+
+  color: white;
+  background: linear-gradient(135deg, #9b7bea, #67b9da);
+  border: 4px solid rgb(255 255 255 / 70%);
+  border-radius: 12px;
+  box-shadow: 0 8px 20px rgb(103 89 174 / 22%);
+  font-size: 11px;
+}
+
+/* Form */
+
+.plan-input {
+  width: 100%;
+  padding: 14px 16px;
+
+  color: #172033;
+  background: rgb(255 255 255 / 76%);
+  border: 1px solid rgb(114 108 151 / 25%);
+  border-radius: 14px;
+  outline: none;
+
+  transition:
+    border-color 160ms ease,
+    box-shadow 160ms ease,
+    background 160ms ease;
+}
+
+.plan-input::placeholder {
+  color: #9297a5;
+}
+
+.plan-input:focus {
+  background: rgb(255 255 255 / 94%);
+  border-color: #8f7bd9;
+  box-shadow:
+    0 0 0 4px rgb(143 123 217 / 13%),
+    0 8px 24px rgb(83 72 130 / 8%);
+}
+
+.create-room-button {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+
+  margin-top: 20px;
+  padding: 14px 18px;
+
+  color: white;
+  background: linear-gradient(135deg, #7160bd, #547fca);
+  border: 0;
+  border-radius: 14px;
+  box-shadow: 0 12px 28px rgb(91 91 175 / 22%);
+
+  font-weight: 650;
+  cursor: pointer;
+
+  transition:
+    transform 160ms ease,
+    box-shadow 160ms ease;
+}
+
+.create-room-button:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 16px 34px rgb(91 91 175 / 28%);
+}
+
+.create-room-button:active {
+  transform: translateY(0);
+}
+
+.privacy-note {
+  margin-top: 18px;
+  color: #7a7f8f;
+  font-size: 12px;
+  line-height: 1.5;
+  text-align: center;
+}
+
+@media (max-width: 600px) {
+  .home-card {
+    padding: 30px 24px;
+    border-radius: 22px;
+  }
+
+  .flow-line {
+    width: 44px;
+  }
+}
