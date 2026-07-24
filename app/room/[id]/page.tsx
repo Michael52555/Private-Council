@@ -25,6 +25,7 @@ type PreferenceInterpretation = {
   summary: string;
   structuredData: StructuredPreferenceData;
   source: "mock";
+  confirmed: boolean;
 };
 
 type Preference = {
@@ -109,6 +110,7 @@ function mockInterpretPreference(
         maxDistanceMiles,
       },
       source: "mock",
+      confirmed: false
     };
   }
 
@@ -116,6 +118,7 @@ function mockInterpretPreference(
     summary: text,
     structuredData: {},
     source: "mock",
+    confirmed: false
   };
 }
 
@@ -275,8 +278,9 @@ export default function RoomPage() {
                 statement: trimmedStatement,
                 importance: draft.importance,
                 visibility: draft.visibility,
-              }
-            : preference,
+                interpretation: undefined,
+                }
+            : preference
         ),
       );
     } else {
@@ -310,6 +314,27 @@ export default function RoomPage() {
         };
         }),
     );
+    }
+
+    function handleConfirmInterpretation(preferenceId: string) {
+        setPreferences((currentPreferences) =>
+            currentPreferences.map((preference) => {
+            if (
+                preference.id !== preferenceId ||
+                !preference.interpretation
+            ) {
+                return preference;
+            }
+
+            return {
+                ...preference,
+                interpretation: {
+                ...preference.interpretation,
+                confirmed: true,
+                },
+            };  
+            }),
+        );
     }
 
   function handleEditPreference(preference: Preference) {
@@ -634,6 +659,25 @@ export default function RoomPage() {
                                             </p>
                                             </div>
                                         </div>
+
+                                        <div className="flex shrink-0 items-center gap-3">
+                                        {preference.interpretation.confirmed ? (
+                                            <span className="inline-flex items-center gap-1.5 rounded-full bg-green-100 px-3 py-1.5 text-xs font-semibold text-green-700">
+                                            <span>✓</span>
+                                            Confirmed
+                                            </span>
+                                        ) : (
+                                            <button
+                                            type="button"
+                                            onClick={() =>
+                                                handleConfirmInterpretation(preference.id)
+                                            }
+                                            className="rounded-xl bg-purple-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-purple-700"
+                                            >
+                                            Confirm
+                                            </button>
+                                        )}
+                                        </div>  
 
                                         <button
                                             type="button"
