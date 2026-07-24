@@ -21,10 +21,26 @@ type StructuredPreferenceData = {
   maxDistanceMiles?: number;
 };
 
+type DistanceInterpretationApiResult =
+  | {
+      status: "success";
+      summary: string;
+      maxMiles: number;
+      clarificationQuestion: null;
+    }
+  | {
+      status: "needs_clarification";
+      summary: string;
+      maxMiles: null;
+      clarificationQuestion: string;
+    };
+
 type PreferenceInterpretation = {
+  status: "success" | "needs_clarification";
   summary: string;
   structuredData: StructuredPreferenceData;
-  source: "mock";
+  clarificationQuestion: string | null;
+  source: "mock" | "ai";
   confirmed: boolean;
 };
 
@@ -83,44 +99,44 @@ const emptyDraft: PreferenceDraft = {
   visibility: "private",
 };
 
-function mockInterpretPreference(
-  preference: Preference,
-): PreferenceInterpretation {
-  const text = preference.statement.trim();
+// function mockInterpretPreference(
+//   preference: Preference,
+// ): PreferenceInterpretation {
+//   const text = preference.statement.trim();
 
-  if (
-    preference.category === "location" ||
-    preference.category === "distance"
-  ) {
-    const distanceMatch = text.match(
-      /(\d+(?:\.\d+)?)\s*(?:mile|miles|mi)\b/i,
-    );
+//   if (
+//     preference.category === "location" ||
+//     preference.category === "distance"
+//   ) {
+//     const distanceMatch = text.match(
+//       /(\d+(?:\.\d+)?)\s*(?:mile|miles|mi)\b/i,
+//     );
 
-    const maxDistanceMiles = distanceMatch
-      ? Number(distanceMatch[1])
-      : undefined;
+//     const maxDistanceMiles = distanceMatch
+//       ? Number(distanceMatch[1])
+//       : undefined;
 
-    return {
-      summary:
-        maxDistanceMiles !== undefined
-          ? `Stay within ${maxDistanceMiles} miles of the stated location`
-          : "Use the stated location as a planning reference",
-      structuredData: {
-        locationText: text,
-        maxDistanceMiles,
-      },
-      source: "mock",
-      confirmed: false
-    };
-  }
+//     return {
+//       summary:
+//         maxDistanceMiles !== undefined
+//           ? `Stay within ${maxDistanceMiles} miles of the stated location`
+//           : "Use the stated location as a planning reference",
+//       structuredData: {
+//         locationText: text,
+//         maxDistanceMiles,
+//       },
+//       source: "mock",
+//       confirmed: false
+//     };
+//   }
 
-  return {
-    summary: text,
-    structuredData: {},
-    source: "mock",
-    confirmed: false
-  };
-}
+//   return {
+//     summary: text,
+//     structuredData: {},
+//     source: "mock",
+//     confirmed: false
+//   };
+// }
 
 function PlanningBackground() {
   return (
@@ -164,6 +180,13 @@ export default function RoomPage() {
 
   const [draft, setDraft] = useState<PreferenceDraft>(emptyDraft);
   const [editingId, setEditingId] = useState<string | null>(null);
+
+  const [interpretingId, setInterpretingId] =
+  useState<string | null>(null);
+
+  const [interpretErrors, setInterpretErrors] = useState<
+    Record<string, string>
+    >({});
 
   const [hasLoaded, setHasLoaded] = useState(false);
   const [saveStatus, setSaveStatus] = useState<
@@ -301,27 +324,110 @@ export default function RoomPage() {
     resetDraft();
   }
 
-    function handleMockInterpret(preferenceId: string) {
-    setPreferences((currentPreferences) =>
-        currentPreferences.map((preference) => {
-        if (preference.id !== preferenceId) {
-            return preference;
+    async function handleInterpret(preference: Preference) {
+        if (preference.category !== "distance") {
+            setInterpretErrors((currentErrors) => ({
+            ...currentErrors,
+            [preference.id]:
+                "Real interpretation currently supports Distance only.",
+            }));
+
+            return;
         }
 
-        return {
-            ...preference,
-            interpretation: mockInterpretPreference(preference),
-        };
-        }),
-    );
+        setInterpretingId(preference.id);
+
+        setInterpretErrors((currentErrors) => {
+            const nextErrors = { ...currentErrors };
+            delete nextErrors[preference.id];
+            return nextErrors;
+        });
+
+        try {
+            const response = await fetch("/api/interpret-distance", {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+                statement: preference.statement,
+            }),
+            });
+
+            const data = (await response.json()) as
+            | DistanceInterpretationApiResult
+            | { error?: string };
+
+            if (!response.ok) {
+            const message =
+                "error" in data && typeof data.error === "string"
+                ? data.error
+                : "Could not interpret this preference.";
+
+            throw new Error(message);
+            }
+
+            if (!("status" in data)) {
+            throw new Error(
+                "The interpretation endpoint returned an invalid response.",
+            );
+            }
+
+            const interpretation: PreferenceInterpretation =
+            data.status === "success"
+                ? {
+                    status: "success",
+                    summary: data.summary,
+                    structuredData: {
+                    maxDistanceMiles: data.maxMiles,
+                    },
+                    clarificationQuestion: null,
+                    source: "ai",
+                    confirmed: false,
+                }
+                : {
+                    status: "needs_clarification",
+                    summary: data.summary,
+                    structuredData: {},
+                    clarificationQuestion: data.clarificationQuestion,
+                    source: "ai",
+                    confirmed: false,
+                };
+
+            setPreferences((currentPreferences) =>
+            currentPreferences.map((currentPreference) =>
+                currentPreference.id === preference.id
+                ? {
+                    ...currentPreference,
+                    interpretation,
+                    }
+                : currentPreference,
+            ),
+            );
+        } catch (error) {
+            const message =
+            error instanceof Error
+                ? error.message
+                : "Could not interpret this preference.";
+
+            setInterpretErrors((currentErrors) => ({
+            ...currentErrors,
+            [preference.id]: message,
+            }));
+        } finally {
+            setInterpretingId((currentId) =>
+            currentId === preference.id ? null : currentId,
+            );
+        }
     }
 
-    function handleConfirmInterpretation(preferenceId: string) {
+    function handleConfirmInterpretation( preferenceId: string,) {
         setPreferences((currentPreferences) =>
             currentPreferences.map((preference) => {
             if (
                 preference.id !== preferenceId ||
-                !preference.interpretation
+                !preference.interpretation ||
+                preference.interpretation.status !== "success"
             ) {
                 return preference;
             }
@@ -332,10 +438,11 @@ export default function RoomPage() {
                 ...preference.interpretation,
                 confirmed: true,
                 },
-            };  
+            };
             }),
         );
     }
+
 
   function handleEditPreference(preference: Preference) {
     setEditingId(preference.id);
@@ -631,7 +738,7 @@ export default function RoomPage() {
                                     <div className="mt-4">
                                         <button
                                         type="button"
-                                        onClick={() => handleMockInterpret(preference.id)}
+                                        onClick={() => handleInterpret(preference)}
                                         className="inline-flex items-center gap-2 text-sm font-semibold text-purple-600 transition hover:text-purple-800"
                                         >
                                         <span>✦</span>
@@ -639,6 +746,15 @@ export default function RoomPage() {
                                         </button>
                                     </div>
                                 )}
+
+                                {interpretErrors[preference.id] && (
+                                    <div className="mt-3 rounded-xl border border-red-100 bg-red-50 px-4 py-3">
+                                        <p className="text-sm font-medium text-red-700">
+                                        {interpretErrors[preference.id]}
+                                        </p>
+                                    </div>
+                                )}
+                                
 
 
                                 {preference.interpretation && (
@@ -660,13 +776,35 @@ export default function RoomPage() {
                                             </div>
                                         </div>
 
+                                        {preference.interpretation.status ===
+                                            "needs_clarification" &&
+                                            preference.interpretation.clarificationQuestion && (
+                                                <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
+                                                <p className="text-xs font-semibold uppercase tracking-wide text-amber-700">
+                                                    Agent needs one detail
+                                                </p>
+
+                                                <p className="mt-1 text-sm text-amber-900">
+                                                    {
+                                                    preference.interpretation
+                                                        .clarificationQuestion
+                                                    }
+                                                </p>
+
+                                                <button
+                                                    type="button"
+                                                    onClick={() =>
+                                                    handleEditPreference(preference)
+                                                    }
+                                                    className="mt-3 text-sm font-semibold text-amber-800 hover:text-amber-950"
+                                                >
+                                                    Edit preference
+                                                </button>
+                                                </div>
+                                            )}
+
                                         <div className="flex shrink-0 items-center gap-3">
-                                        {preference.interpretation.confirmed ? (
-                                            <span className="inline-flex items-center gap-1.5 rounded-full bg-green-100 px-3 py-1.5 text-xs font-semibold text-green-700">
-                                            <span>✓</span>
-                                            Confirmed
-                                            </span>
-                                        ) : (
+                                        {preference.interpretation.status === "success" && !preference.interpretation.confirmed && (
                                             <button
                                             type="button"
                                             onClick={() =>
@@ -681,7 +819,7 @@ export default function RoomPage() {
 
                                         <button
                                             type="button"
-                                            onClick={() => handleMockInterpret(preference.id)}
+                                            onClick={() => handleInterpret(preference)}
                                             className="shrink-0 text-sm font-semibold text-purple-600 transition hover:text-purple-800"
                                         >
                                             Re-interpret
