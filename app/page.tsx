@@ -16,18 +16,57 @@ function PlanningBackground() {
         viewBox="0 0 1440 900"
         preserveAspectRatio="xMidYMid slice"
       >
-        <path d="M120 180 C350 220 430 350 610 410" />
-        <path d="M1320 160 C1100 210 1030 330 830 400" />
-        <path d="M90 700 C300 650 410 570 610 500" />
-        <path d="M1350 720 C1120 660 1030 580 830 510" />
-      </svg>
+        {/* Left agents */}
+        <path d="M260 190 C420 220 520 270 620 310" />
+        <path d="M220 450 C390 450 510 450 620 450" />
+        <path d="M260 710 C420 680 520 630 620 590" />
 
-      <span className="agent agent-one" />
-      <span className="agent agent-two" />
-      <span className="agent agent-three" />
-      <span className="agent agent-four" />
-      <span className="agent agent-five" />
-    </div>
+        {/* Right agents */}
+        <path d="M1180 190 C1020 220 920 270 820 310" />
+        <path d="M1220 450 C1050 450 930 450 820 450" />
+        <path d="M1180 710 C1020 680 920 630 820 590" />
+
+        {/* Left agent nodes */}
+        <circle
+          className="map-agent map-agent-pink"
+          cx="260"
+          cy="190"
+          r="7"
+        />
+        <circle
+          className="map-agent map-agent-blue"
+          cx="220"
+          cy="450"
+          r="7"
+        />
+        <circle
+          className="map-agent map-agent-purple"
+          cx="260"
+          cy="710"
+          r="7"
+        />
+
+        {/* Right agent nodes */}
+        <circle
+          className="map-agent map-agent-green"
+          cx="1180"
+          cy="190"
+          r="7"
+        />
+        <circle
+          className="map-agent map-agent-gold"
+          cx="1220"
+          cy="450"
+          r="7"
+        />
+        <circle
+          className="map-agent map-agent-rose"
+          cx="1180"
+          cy="710"
+          r="7"
+        />
+      </svg>
+  </div>
   );
 }
 

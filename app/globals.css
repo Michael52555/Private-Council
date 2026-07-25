@@ -5,6 +5,44 @@
   --foreground: #171717;
 }
 
+html,
+body {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: hidden;
+}
+
+.room-page {
+  position: relative;
+  isolation:isolate;
+  min-height: 100dvh;
+  width: 100%;
+
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+
+  padding: 88px 24px;
+  overflow-x: clip;
+  overscroll-behavior-x: none;
+  touch-action: pan-y;
+
+  background:
+  radial-gradient(circle at 15% 15%, #f3efff 0, transparent 32%),
+  radial-gradient(circle at 85% 75%, #e7fff4 0, transparent 30%),
+  linear-gradient(145deg, #edf5ff 0%, #f7f4ff 50%, #eef9ff 100%);
+}
+
+.room-card {
+  position: relative;
+  z-index: 10;
+
+  width: min(calc(100% - 32px), 1180px);
+  margin: 40px auto;
+
+  transform: none;
+}
+
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
@@ -25,29 +63,16 @@ body {
   font-family: Arial, Helvetica, sans-serif;
 }
 
-.room-page {
-  position: relative;
-  isolation: isolate;
-  min-height: 100vh;
-  overflow: hidden;
-
-  display: flex;
-  justify-content: center;
-  align-items: flex-start;
-  padding: 88px 24px;
-
-  background:
-    radial-gradient(circle at 15% 15%, #f3efff 0, transparent 32%),
-    radial-gradient(circle at 85% 75%, #e7fff4 0, transparent 30%),
-    linear-gradient(145deg, #edf5ff 0%, #f7f4ff 50%, #eef9ff 100%);
-}
-
 .planning-background {
-  position: absolute;
+  position: fixed;
   inset: 0;
-  z-index: -1;
+  z-index: 0;
+  overflow: hidden;
   pointer-events: none;
+  user-select: none;
 }
+
+
 
 /* Soft colored atmosphere */
 
@@ -104,49 +129,65 @@ body {
 
 .agent {
   position: absolute;
-  width: 12px;
-  height: 12px;
-  border: 3px solid rgb(255 255 255 / 80%);
+  width: 20px;
+  height: 20px;
+  border: 3px solid rgba(149, 145, 159, 0.8);
   border-radius: 50%;
-  background: #8c7bea;
+  background: #ea7bb4;
   box-shadow:
-    0 0 0 7px rgb(140 123 234 / 10%),
-    0 0 28px rgb(140 123 234 / 45%);
+    0 0 0 7px rgba(205, 203, 218, 0.1),
+    0 0 28px rgba(233, 5, 134, 0.45);
   animation: float-agent 5s ease-in-out infinite;
 }
-
 .agent-one {
-  top: 19%;
-  left: 8%;
+  top: 23%;
+  left: 18%;
 }
 
 .agent-two {
-  top: 16%;
-  right: 8%;
+  top: 22%;
+  right: 18%;
   background: #52bfa0;
-  animation-delay: -1s;
+  animation-delay: -1.5s;
 }
 
 .agent-three {
-  bottom: 20%;
-  left: 6%;
+  bottom: 23%;
+  left: 16%;
   background: #65a4e8;
-  animation-delay: -2.5s;
+  animation-delay: -3s;
 }
 
 .agent-four {
-  right: 6%;
-  bottom: 18%;
+  right: 16%;
+  bottom: 22%;
   background: #dc8ac7;
   animation-delay: -3.5s;
 }
 
-.agent-five {
-  left: 19%;
-  bottom: 8%;
-  width: 8px;
-  height: 8px;
-  animation-delay: -4s;
+.agent {
+  animation: agentFloat 7s ease-in-out infinite;
+}
+
+.agent-two {
+  animation-delay: -1.5s;
+}
+
+.agent-three {
+  animation-delay: -3s;
+}
+
+@keyframes agentFloat {
+  0%,
+  100% {
+    transform: translateY(0) scale(1);
+    opacity: 0.55;
+  }
+
+  50% {
+    transform: translateY(-8px) scale(1.08);
+    opacity: 0.9;
+  }
 }
 
 /* Make the existing card feel integrated */
@@ -241,10 +282,11 @@ body {
 
 .home-card {
   position: relative;
-  z-index: 1;
-  width: min(540px, 100%);
+  z-index: 10;
+
+  width: clamp(400px, 38vw, 680px);
+  padding: 52px;
   overflow: hidden;
-  padding: 42px;
 
   background:
     radial-gradient(
@@ -271,23 +313,6 @@ body {
 
 /* Colored highlight along the card top */
 
-.home-card::before {
-  content: "";
-  position: absolute;
-  top: 0;
-  left: 12%;
-  width: 76%;
-  height: 3px;
-  border-radius: 0 0 999px 999px;
-  background: linear-gradient(
-    90deg,
-    transparent,
-    #a78bfa,
-    #60a5fa,
-    #5eead4,
-    transparent
-  );
-}
 
 .home-card-glow {
   position: absolute;
@@ -298,6 +323,20 @@ body {
   border-radius: 50%;
   background: rgb(167 139 250 / 18%);
   filter: blur(50px);
+  pointer-events: none;
+}
+
+.home-card::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  bottom: -90px;
+  width: 360px;
+  height: 180px;
+  transform: translateX(-50%);
+  border-radius: 999px;
+  background: rgba(139, 92, 246, 0.18);
+  filter: blur(70px);
   pointer-events: none;
 }
 
@@ -353,6 +392,60 @@ body {
 .mini-agent-green {
   background: #52bfa0;
   box-shadow: 0 0 0 6px rgb(82 191 160 / 12%);
+}
+
+.map-agent {
+  stroke: rgb(255 255 255 / 88%);
+  stroke-width: 4px;
+
+  filter: drop-shadow(0 0 8px rgb(124 58 237 / 28%));
+
+  transform-box: fill-box;
+  transform-origin: center;
+
+  animation: map-agent-pulse 7s ease-in-out infinite;
+}
+
+.map-agent-pink {
+  fill: #dc8ac7;
+}
+
+.map-agent-blue {
+  fill: #65a4e8;
+  animation-delay: -1.2s;
+}
+
+.map-agent-purple {
+  fill: #8c7bea;
+  animation-delay: -2.4s;
+}
+
+.map-agent-green {
+  fill: #52bfa0;
+  animation-delay: -3.2s;
+}
+
+.map-agent-gold {
+  fill: #e0ad65;
+  animation-delay: -4.2s;
+}
+
+.map-agent-rose {
+  fill: #d97d9f;
+  animation-delay: -5.2s;
+}
+
+@keyframes map-agent-pulse {
+  0%,
+  100% {
+    opacity: 0.65;
+    transform: scale(1);
+  }
+
+  50% {
+    opacity: 1;
+    transform: scale(1.18);
+  }
 }
 
 .flow-line {

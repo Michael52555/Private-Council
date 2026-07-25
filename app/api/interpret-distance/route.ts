@@ -85,6 +85,7 @@ export async function POST(request: Request) {
         "The preference category is already known to be distance.",
         "Extract only an explicit maximum distance measured in miles.",
         "A bare statement such as '5 miles' means a maximum of 5 miles.",
+        "if they include words like 'minimum' or 'least', if there is no maximum then ask. otherwise, just interpret the maximum distance information",
         "Accept phrases such as within, under, at most, maximum, no more than, and do not want to travel more than.",
         "Return success only when there is an explicit positive number of miles.",
         "accept anything like mi, mil",
