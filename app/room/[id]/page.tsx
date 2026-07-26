@@ -78,26 +78,13 @@ type RestaurantCandidate = CandidatePlan & {
   address: string;
 };
 
-const demoCandidates: RestaurantCandidate[] = [
-  {
-    id: "restaurant-1",
-    name: "Sakura Table",
-    address: "123 Demo Street",
-    distanceMiles: 3.4,
-  },
-  {
-    id: "restaurant-2",
-    name: "Nori House",
-    address: "456 Demo Avenue",
-    distanceMiles: 5.8,
-  },
-  {
-    id: "restaurant-3",
-    name: "Tokyo Garden",
-    address: "789 Demo Boulevard",
-    distanceMiles: 8.1,
-  },
-];
+type GenerateCandidatesApiResponse =
+  | {
+      candidates: RestaurantCandidate[];
+    }
+  | {
+      error: string;
+    };
 
 type DistanceEvaluation =
   | {
@@ -371,6 +358,15 @@ export default function RoomPage() {
   const [displayName, setDisplayName] = useState("");
   const [preferences, setPreferences] = useState<Preference[]>([]);
 
+  const [candidates, setCandidates] =
+  useState<RestaurantCandidate[]>([]);
+
+  const [candidateGenerationError, setCandidateGenerationError] =
+  useState("");
+
+  const [isGeneratingCandidates, setIsGeneratingCandidates] =
+  useState(false);
+
   const [draft, setDraft] = useState<PreferenceDraft>(emptyDraft);
   const [editingId, setEditingId] = useState<string | null>(null);
 
@@ -381,21 +377,10 @@ export default function RoomPage() {
     Record<string, string>
     >({});
 
-    const [candidateName, setCandidateName] =
-    useState("Test Restaurant");
-
-    const [candidateDistance, setCandidateDistance] =
-        useState("7.2");
-
-    const [distanceEvaluation, setDistanceEvaluation] =
-        useState<DistanceEvaluation | null>(null);
-
-    const [candidateError, setCandidateError] = useState("");
-
-  const [hasLoaded, setHasLoaded] = useState(false);
-  const [saveStatus, setSaveStatus] = useState<
-    "loading" | "saved" | "saving"
-  >("loading");
+    const [hasLoaded, setHasLoaded] = useState(false);
+    const [saveStatus, setSaveStatus] = useState<
+        "loading" | "saved" | "saving"
+    >("loading");
 
   
 
@@ -467,6 +452,55 @@ export default function RoomPage() {
       alert("Could not copy the link. Please copy it from the address bar.");
     }
   }
+
+  async function handleGenerateCandidates() {
+    setIsGeneratingCandidates(true);
+    setCandidateGenerationError("");
+
+    try {
+        const response = await fetch(
+        "/api/generate-candidates",
+        {
+            method: "POST",
+            headers: {
+            "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+            planName,
+            }),
+        },
+    );
+
+        const data =
+        (await response.json()) as GenerateCandidatesApiResponse;
+
+        if (!response.ok) {
+        const message =
+            "error" in data
+            ? data.error
+            : "Could not generate candidate options.";
+
+        throw new Error(message);
+        }
+
+        if (!("candidates" in data)) {
+        throw new Error(
+            "The coordinator returned an invalid response.",
+        );
+        }
+
+        setCandidates(data.candidates);
+    } catch (error) {
+        const message =
+        error instanceof Error
+            ? error.message
+            : "Could not generate candidate options.";
+
+        setCandidateGenerationError(message);
+    } finally {
+        setIsGeneratingCandidates(false);
+    }
+}
 
   function updateDraft<K extends keyof PreferenceDraft>(
     field: K,
@@ -679,55 +713,6 @@ export default function RoomPage() {
     }
   }
 
-  function handleEvaluateCandidate(
-    event: FormEvent<HTMLFormElement>,
-    ) {
-    event.preventDefault();
-
-    const trimmedCandidateName = candidateName.trim();
-    const parsedDistance = Number(candidateDistance);
-
-    if (!trimmedCandidateName) {
-        setCandidateError("Please enter a candidate name.");
-        setDistanceEvaluation(null);
-        return;
-    }
-
-    const candidate: CandidatePlan = {
-        id: "manual-distance-test",
-        name: trimmedCandidateName,
-        distanceMiles: parsedDistance,
-    };
-
-    if (!confirmedDistancePreference) {
-        setCandidateError(
-        "Interpret and confirm a distance preference first.",
-        );
-        setDistanceEvaluation(null);
-        return;
-    }
-
-    if (
-        !Number.isFinite(parsedDistance) ||
-        parsedDistance < 0
-    ) {
-        setCandidateError(
-        "Please enter a valid non-negative distance.",
-        );
-        setDistanceEvaluation(null);
-        return;
-    }
-    
-
-    const evaluation = evaluateDistancePreference(
-        candidate,
-        confirmedDistancePreference,
-    );
-
-    setCandidateError("");
-    setDistanceEvaluation(evaluation);
-}
-
     const confirmedDistancePreference = preferences.find(
         (preference) =>
         preference.category === "distance" &&
@@ -737,8 +722,8 @@ export default function RoomPage() {
             .maxDistanceMiles === "number",
     );
 
-    const evaluatedDemoCandidates = confirmedDistancePreference
-    ? demoCandidates.map((candidate) => ({
+    const evaluatedCandidates = confirmedDistancePreference
+    ? candidates.map((candidate) => ({
         candidate,
         evaluation: evaluateDistancePreference(
             candidate,
@@ -747,8 +732,8 @@ export default function RoomPage() {
         }))
     : [];
 
-    const sortedDemoCandidates = [
-        ...evaluatedDemoCandidates,
+    const sortedCandidates = [
+        ...evaluatedCandidates,
         ].sort((first, second) => {
         const statusDifference =
             evaluationPriority[first.evaluation.status] -
@@ -1153,131 +1138,6 @@ export default function RoomPage() {
                     </div>
                     )}
                 </section>
-                <section className="mt-8 rounded-3xl border border-purple-100 bg-white p-6 shadow-xl shadow-purple-100/40">
-                    <div className="flex items-start gap-4">
-                        <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-purple-100 text-xl text-purple-700">
-                        ◆
-                        </div>
-
-                        <div>
-                        <p className="text-xs font-semibold uppercase tracking-widest text-purple-600">
-                            Local candidate test
-                        </p>
-
-                        <h2 className="mt-1 text-xl font-semibold text-gray-900">
-                            Can this plan work for you?
-                        </h2>
-
-                        <p className="mt-1 text-sm leading-6 text-gray-500">
-                            This evaluation runs locally using your confirmed
-                            distance preference.
-                        </p>
-                        </div>
-                    </div>
-
-                    <form
-                        onSubmit={handleEvaluateCandidate}
-                        className="mt-6 grid gap-4 sm:grid-cols-[1fr_180px]"
-                    >
-                        <div>
-                        <label
-                            htmlFor="candidate-name"
-                            className="mb-2 block text-sm font-semibold text-gray-800"
-                        >
-                            Candidate name
-                        </label>
-
-                        <input
-                            id="candidate-name"
-                            type="text"
-                            value={candidateName}
-                            onChange={(event) => {
-                            setCandidateName(event.target.value);
-                            setDistanceEvaluation(null);
-                            }}
-                            className="w-full rounded-2xl border border-gray-300 bg-gray-50 px-4 py-3 text-gray-900 outline-none transition focus:border-purple-500 focus:bg-white focus:ring-4 focus:ring-purple-100"
-                        />
-                        </div>
-
-                        <div>
-                        <label
-                            htmlFor="candidate-distance"
-                            className="mb-2 block text-sm font-semibold text-gray-800"
-                        >
-                            Distance
-                        </label>
-
-                        <div className="relative">
-                            <input
-                            id="candidate-distance"
-                            type="number"
-                            min="0"
-                            step="0.1"
-                            value={candidateDistance}
-                            onChange={(event) => {
-                                setCandidateDistance(event.target.value);
-                                setDistanceEvaluation(null);
-                            }}
-                            className="w-full rounded-2xl border border-gray-300 bg-gray-50 px-4 py-3 pr-16 text-gray-900 outline-none transition focus:border-purple-500 focus:bg-white focus:ring-4 focus:ring-purple-100"
-                            />
-
-                            <span className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 text-sm font-medium text-gray-400">
-                            miles
-                            </span>
-                        </div>
-                        </div>
-
-                        <button
-                        type="submit"
-                        className="rounded-2xl bg-gray-900 px-6 py-3 font-semibold text-white transition hover:-translate-y-0.5 hover:bg-purple-700 sm:col-span-2"
-                        >
-                        Evaluate locally
-                        </button>
-                    </form>
-
-                    {candidateError && (
-                        <div className="mt-4 rounded-2xl border border-red-100 bg-red-50 px-4 py-3">
-                        <p className="text-sm font-medium text-red-700">
-                            {candidateError}
-                        </p>
-                        </div>
-                    )}
-
-                    {distanceEvaluation && (
-                        <div
-                        className={`mt-5 rounded-2xl border px-5 py-4 ${
-                            evaluationStyles[distanceEvaluation.status]
-                        }`}
-                        >
-                        <div className="flex flex-wrap items-center justify-between gap-3">
-                            <div>
-                            <p className="text-xs font-semibold uppercase tracking-widest opacity-70">
-                                Local agent result
-                            </p>
-
-                            <p className="mt-1 text-lg font-semibold">
-                                {evaluationLabels[distanceEvaluation.status]}
-                            </p>
-                            </div>
-
-                            {distanceEvaluation.status !== "not_ready" &&
-                            distanceEvaluation.excessMiles > 0 && (
-                                <span className="rounded-full bg-white/70 px-3 py-1 text-sm font-semibold">
-                                +{distanceEvaluation.excessMiles} miles
-                                </span>
-                            )}
-                        </div>
-
-                        <p className="mt-3 text-sm leading-6">
-                            {distanceEvaluation.privateReason}
-                        </p>
-
-                        <p className="mt-3 text-xs opacity-60">
-                            Private explanation · Not shared with the group
-                        </p>
-                        </div>
-                    )}
-                    </section>
 
                     <section className="relative mt-8 overflow-hidden rounded-3xl bg-gray-950 p-6 text-white shadow-2xl shadow-purple-950/20">
                         {/* Decorative glows */}
@@ -1301,29 +1161,63 @@ export default function RoomPage() {
                                 </p>
                             </div>
 
-                            <span className="rounded-full border border-white/10 bg-white/10 px-3 py-1 text-sm font-semibold text-gray-200">
-                                {demoCandidates.length} options
-                            </span>
+                            <div className="flex items-center gap-3">
+                                <span className="rounded-full border border-white/10 bg-white/10 px-3 py-1 text-sm font-semibold text-gray-200">
+                                    {candidates.length} options
+                                </span>
+
+                                <button
+                                    type="button"
+                                    onClick={handleGenerateCandidates}
+                                    disabled={isGeneratingCandidates || !confirmedDistancePreference}
+                                    className="rounded-xl bg-purple-500 px-4 py-2 text-sm font-semibold text-white transition hover:bg-purple-400 disabled:cursor-not-allowed disabled:opacity-60"
+                                >
+                                    {isGeneratingCandidates
+                                    ? "Generating..."
+                                    : candidates.length > 0
+                                        ? "Regenerate options"
+                                        : "Generate options"}
+                                </button>
+                            </div>
+
+                            {candidateGenerationError && (
+                            <div className="mt-5 rounded-2xl border border-red-400/20 bg-red-500/10 px-4 py-3">
+                                <p className="text-sm font-medium text-red-200">
+                                {candidateGenerationError}
+                                </p>
+                            </div>
+                            )}
+
+                            
                             </div>
 
                             {!confirmedDistancePreference ? (
+                            <div className="mt-6 rounded-2xl border border-dashed border-white/15 bg-white/5 px-6 py-10 text-center">
+                                <p className="font-medium text-white">
+                                Your local agent is not ready
+                                </p>
+
+                                <p className="mt-2 text-sm text-gray-400">
+                                Interpret and confirm a distance preference first.
+                                </p>
+                            </div>
+                            ) : candidates.length === 0 ? (
                             <div className="mt-6 rounded-2xl border border-dashed border-white/15 bg-white/5 px-6 py-10 text-center">
                                 <div className="mx-auto flex h-11 w-11 items-center justify-center rounded-2xl bg-purple-500/15 text-purple-300">
                                 ✦
                                 </div>
 
                                 <p className="mt-4 font-medium text-white">
-                                Your agent is not ready to compare options
+                                No candidate options yet
                                 </p>
 
                                 <p className="mt-2 text-sm text-gray-400">
-                                Add, interpret, and confirm a distance preference
-                                first.
+                                Ask the coordinator to generate options for this plan.
                                 </p>
                             </div>
                             ) : (
                             <div className="mt-6 grid gap-4 lg:grid-cols-3">
-                                {sortedDemoCandidates.map(
+                                {sortedCandidates.map(
                                 ({ candidate, evaluation }, index) => (
                                     <article
                                     key={candidate.id}
