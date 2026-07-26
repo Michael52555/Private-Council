@@ -57,6 +57,7 @@ type Preference = {
 type LocalAgentState = {
   version: 1;
   displayName: string;
+  privateOriginAddress: string;
   preferences: Preference[];
   updatedAt: string;
 };
@@ -364,6 +365,9 @@ export default function RoomPage() {
   const [candidateGenerationError, setCandidateGenerationError] =
   useState("");
 
+  const [privateOriginAddress, setPrivateOriginAddress] =
+  useState("");
+
   const [isGeneratingCandidates, setIsGeneratingCandidates] =
   useState(false);
 
@@ -399,6 +403,12 @@ export default function RoomPage() {
           setDisplayName(parsedState.displayName);
         }
 
+        if (typeof parsedState.privateOriginAddress === "string") {
+            setPrivateOriginAddress(
+                parsedState.privateOriginAddress,
+            );
+        }
+
         if (Array.isArray(parsedState.preferences)) {
           setPreferences(parsedState.preferences);
         }
@@ -424,6 +434,7 @@ export default function RoomPage() {
         version: 1,
         displayName,
         preferences,
+        privateOriginAddress,
         updatedAt: new Date().toISOString(),
       };
 
@@ -438,7 +449,7 @@ export default function RoomPage() {
     return () => {
       window.clearTimeout(timer);
     };
-  }, [displayName, preferences, hasLoaded, storageKey]);
+  }, [displayName, preferences, hasLoaded, privateOriginAddress, storageKey]);
 
   async function handleCopyLink() {
     try {
@@ -467,6 +478,7 @@ export default function RoomPage() {
             },
             body: JSON.stringify({
             planName,
+            originAddress: privateOriginAddress.trim(),
             }),
         },
     );
@@ -786,6 +798,53 @@ export default function RoomPage() {
                     only on this page.
                     </p>
                 </header>
+
+                <section className="mb-8 rounded-3xl border border-purple-100 bg-white p-6 shadow-sm">
+                    <div className="flex items-start gap-4">
+                        <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-purple-100 text-purple-700">
+                        ◎
+                        </div>
+
+                        <div className="min-w-0 flex-1">
+                        <p className="text-xs font-semibold uppercase tracking-widest text-purple-600">
+                            Private location
+                        </p>
+
+                        <h2 className="mt-1 text-xl font-semibold text-gray-900">
+                            Starting point
+                        </h2>
+
+                        <p className="mt-1 text-sm leading-6 text-gray-500">
+                            Used to generate and evaluate nearby options.
+                            This address is never shown to other participants.
+                        </p>
+
+                        <label
+                            htmlFor="private-origin-address"
+                            className="mt-5 block text-sm font-semibold text-gray-800"
+                        >
+                            Address
+                        </label>
+
+                        <input
+                            id="private-origin-address"
+                            type="text"
+                            value={privateOriginAddress}
+                            onChange={(event) =>
+                            setPrivateOriginAddress(event.target.value)
+                            }
+                            placeholder="For example: 3551 Trousdale Pkwy, Los Angeles"
+                            autoComplete="street-address"
+                            className="mt-2 w-full rounded-2xl border border-gray-300 bg-gray-50 px-4 py-3 text-gray-900 outline-none transition placeholder:text-gray-400 focus:border-purple-500 focus:bg-white focus:ring-4 focus:ring-purple-100"
+                        />
+
+                        <p className="mt-2 text-xs text-gray-400">
+                            Stored in your local agent and sent only when
+                            generating options.
+                        </p>
+                        </div>
+                    </div>
+                </section>
 
                 <form
                     onSubmit={handlePreferenceSubmit}
