@@ -1,24 +1,33 @@
 "use client";
+import type {
+  Importance,
+  Visibility,
+  PlanningMode,
+  PreferenceCategory,
+  PreferenceInterpretation,
+  Preference,
+  RestaurantCandidate,
+  CandidatePlan,
+  RoomConfig,
+  LocalAgentState,
+} from "@/lib/planning-types";
+
+import {
+  evaluateBudgetScore,
+  evaluateDistanceScore,
+  evaluateRestaurantScore,
+  combineScores,
+  importanceWeight,
+} from "@/lib/scoring";
 
 import { FormEvent, useEffect, useState } from "react";
 import { useParams, useSearchParams } from "next/navigation";
 
-type Importance = 1 | 2 | 3 | 4 | 5;
-
-type Visibility = "private" | "anonymous" | "shareable";
-
-type PreferenceCategory =
-  | "location"
-  | "distance"
-  | "transportation"
-  | "food"
-  | "departure_time"
-  | "return_time"
-  | "other";
-
 type StructuredPreferenceData = {
   locationText?: string;
   maxDistanceMiles?: number;
+  minPriceDollarsPerPerson?: number;
+  maxPriceDollarsPerPerson?: number;
 };
 
 type DistanceInterpretationApiResult =
@@ -35,48 +44,53 @@ type DistanceInterpretationApiResult =
       clarificationQuestion: string;
     };
 
-type PreferenceInterpretation = {
-  status: "success" | "needs_clarification";
-  summary: string;
-  structuredData: StructuredPreferenceData;
-  clarificationQuestion: string | null;
-  source: "mock" | "ai";
-  confirmed: boolean;
-};
+type BudgetInterpretationApiResult =
+  | {
+      status: "success";
+      summary: string;
+      minPriceDollarsPerPerson: number;
+      maxPriceDollarsPerPerson: number;
+      clarificationQuestion: null;
+    }
+  | {
+      status: "needs_clarification";
+      summary: string;
+      maxDollarsPerPerson: null;
+      clarificationQuestion: string;
+    };
 
-type Preference = {
-  id: string;
-  category: PreferenceCategory;
-  statement: string;
-  importance: Importance;
-  visibility: Visibility;
+// type PreferenceInterpretation = {
+//   status: "success" | "needs_clarification";
+//   summary: string;
+//   structuredData: StructuredPreferenceData;
+//   clarificationQuestion: string | null;
+//   source: "mock" | "ai";
+//   confirmed: boolean;
+// };
 
-  interpretation?: PreferenceInterpretation;
-};
+// type Preference = {
+//   id: string;
+//   category: PreferenceCategory;
+//   statement: string;
+//   importance: Importance;
+//   visibility: Visibility;
 
-type LocalAgentState = {
-  version: 1;
-  displayName: string;
-  privateOriginAddress: string;
-  preferences: Preference[];
-  updatedAt: string;
-};
+//   interpretation?: PreferenceInterpretation;
+// };
+
+// type LocalAgentState = {
+//   version: 1;
+//   displayName: string;
+//   privateOriginAddress: string;
+//   preferences: Preference[];
+//   updatedAt: string;
+// };
 
 type PreferenceDraft = {
   category: PreferenceCategory;
   statement: string;
   importance: Importance;
   visibility: Visibility;
-};
-
-type CandidatePlan = {
-  id: string;
-  name: string;
-  distanceMiles: number;
-};
-
-type RestaurantCandidate = CandidatePlan & {
-  address: string;
 };
 
 type GenerateCandidatesApiResponse =
@@ -117,10 +131,23 @@ const categoryLabels: Record<PreferenceCategory, string> = {
   distance: "Distance",
   transportation: "Transportation",
   food: "Food & allergies",
+  budget: "Budget",
   departure_time: "Departure time",
   return_time: "Return time",
   other: "Something else",
 };
+
+function isPreferenceCategory(
+  value: unknown,
+): value is PreferenceCategory {
+  return (
+    typeof value === "string" &&
+    Object.prototype.hasOwnProperty.call(
+      categoryLabels,
+      value,
+    )
+  );
+}
 
 const importanceLabels: Record<Importance, string> = {
   1: "Almost indifferent",
@@ -248,103 +275,62 @@ function PlanningBackground() {
   );
 }
 
-function evaluateDistancePreference(
-  candidate: CandidatePlan,
-  preference: Preference,
-): DistanceEvaluation {
-  const interpretation = preference.interpretation;
+function renderPreferenceDetails(preference: Preference) {
 
-  if (
-    preference.category !== "distance" ||
-    !interpretation ||
-    interpretation.status !== "success" ||
-    !interpretation.confirmed ||
-    typeof interpretation.structuredData.maxDistanceMiles !== "number"
-  ) {
-    return {
-      status: "not_ready",
-      privateReason:
-        "This distance preference has not been successfully interpreted and confirmed.",
-    };
+  console.log(
+    "RENDER DETAIL",
+    preference.id,
+    preference.interpretation
+  );
+  const data = preference.interpretation?.structuredData;
+
+  console.log("STRUCTURED DATA", data);
+
+  switch (preference.category) {
+    case "distance":
+      if (typeof data?.maxDistanceMiles === "number") {
+        return (
+          <div className="mt-2">
+            <p className="text-lg font-semibold text-gray-900">
+              ≤ {data.maxDistanceMiles} miles
+            </p>
+
+            <p className="text-sm text-gray-500">
+              Maximum distance
+            </p>
+          </div>
+        );
+      }
+
+      return null;
+
+
+    case "budget":
+      if (
+        typeof data?.minPriceDollarsPerPerson === "number" &&
+        typeof data?.maxPriceDollarsPerPerson === "number"
+      ) {
+        return (
+          <div className="mt-2">
+            <p className="text-lg font-semibold text-gray-900">
+              ${data.minPriceDollarsPerPerson} - $
+              {data.maxPriceDollarsPerPerson}
+            </p>
+
+            <p className="text-sm text-gray-500">
+              Per person
+            </p>
+          </div>
+        );
+      }
+
+      return null;
+
+
+    default:
+      return null;
   }
-
-  const maxDistanceMiles =
-    interpretation.structuredData.maxDistanceMiles;
-
-  const excessMiles =
-    candidate.distanceMiles - maxDistanceMiles;
-
-  if (excessMiles <= 0) {
-    return {
-      status: "acceptable",
-      excessMiles: 0,
-      privateReason: `${candidate.name} is within your ${maxDistanceMiles}-mile limit.`,
-    };
-  }
-
-  const roundedExcessMiles =
-    Math.round(excessMiles * 10) / 10;
-
-  if (preference.importance === 5) {
-    return {
-      status: "infeasible",
-      excessMiles: roundedExcessMiles,
-      privateReason: `${candidate.name} exceeds your non-negotiable distance limit by ${roundedExcessMiles} miles.`,
-    };
-  }
-
-  if (preference.importance === 4) {
-    return {
-      status: "compromise_required",
-      excessMiles: roundedExcessMiles,
-      privateReason: `${candidate.name} exceeds your strict distance limit by ${roundedExcessMiles} miles.`,
-    };
-  }
-
-  return {
-    status: "acceptable_with_penalty",
-    excessMiles: roundedExcessMiles,
-    privateReason: `${candidate.name} is ${roundedExcessMiles} miles beyond your preferred distance.`,
-  };
 }
-
-const evaluationLabels: Record<
-  DistanceEvaluation["status"],
-  string
-> = {
-  acceptable: "Acceptable",
-  acceptable_with_penalty: "Acceptable with penalty",
-  compromise_required: "Compromise required",
-  infeasible: "Infeasible",
-  not_ready: "Not ready",
-};
-
-const evaluationPriority: Record<
-  DistanceEvaluation["status"],
-  number
-> = {
-  acceptable: 0,
-  acceptable_with_penalty: 1,
-  compromise_required: 2,
-  infeasible: 3,
-  not_ready: 4,
-};
-
-const evaluationStyles: Record<
-  DistanceEvaluation["status"],
-  string
-> = {
-  acceptable:
-    "border-green-200 bg-green-50 text-green-900",
-  acceptable_with_penalty:
-    "border-amber-200 bg-amber-50 text-amber-900",
-  compromise_required:
-    "border-orange-200 bg-orange-50 text-orange-900",
-  infeasible:
-    "border-red-200 bg-red-50 text-red-900",
-  not_ready:
-    "border-gray-200 bg-gray-50 text-gray-800",
-};
 
 export default function RoomPage() {
   const params = useParams<{ id: string }>();
@@ -374,8 +360,16 @@ export default function RoomPage() {
   const [draft, setDraft] = useState<PreferenceDraft>(emptyDraft);
   const [editingId, setEditingId] = useState<string | null>(null);
 
+  const [selectedCategories, setSelectedCategories] =
+  useState<PreferenceCategory[]>([]);
+
   const [interpretingId, setInterpretingId] =
   useState<string | null>(null);
+
+  const [
+  isPreferenceComposerOpen,
+  setIsPreferenceComposerOpen,
+] = useState(false);
 
   const [interpretErrors, setInterpretErrors] = useState<
     Record<string, string>
@@ -399,6 +393,41 @@ export default function RoomPage() {
       try {
         const parsedState = JSON.parse(savedState) as Partial<LocalAgentState>;
 
+        if (
+          Array.isArray(
+            parsedState.selectedCategories,
+          )
+        ) {
+          setSelectedCategories(
+            parsedState.selectedCategories.filter(
+              isPreferenceCategory,
+            ),
+          );
+        } else {
+          const inferredCategories =
+            Array.isArray(parsedState.preferences)
+              ? parsedState.preferences
+                  .map(
+                    (preference) =>
+                      preference.category,
+                  )
+                  .filter(isPreferenceCategory)
+              : [];
+
+          if (
+            typeof parsedState
+              .privateOriginAddress === "string" &&
+            parsedState.privateOriginAddress.trim() &&
+            !inferredCategories.includes("location")
+          ) {
+            inferredCategories.unshift("location");
+          }
+
+          setSelectedCategories([
+            ...new Set(inferredCategories),
+          ]);
+        }
+
         if (typeof parsedState.displayName === "string") {
           setDisplayName(parsedState.displayName);
         }
@@ -421,19 +450,26 @@ export default function RoomPage() {
     setSaveStatus("saved");
   }, [storageKey]);
 
+  
+
   // Automatically save changes after a short delay.
   useEffect(() => {
-    if (!hasLoaded) {
+    if (!hasLoaded || selectedCategories.length == 0) {
       return;
     }
 
+    
+
     setSaveStatus("saving");
+
+    
 
     const timer = window.setTimeout(() => {
       const localAgentState: LocalAgentState = {
         version: 1,
         displayName,
         preferences,
+        selectedCategories,
         privateOriginAddress,
         updatedAt: new Date().toISOString(),
       };
@@ -449,7 +485,7 @@ export default function RoomPage() {
     return () => {
       window.clearTimeout(timer);
     };
-  }, [displayName, preferences, hasLoaded, privateOriginAddress, storageKey]);
+  }, [displayName, preferences, hasLoaded, selectedCategories, privateOriginAddress, storageKey]);
 
   async function handleCopyLink() {
     try {
@@ -545,21 +581,31 @@ export default function RoomPage() {
     setFormError("");
 
     if (editingId) {
-      setPreferences((currentPreferences) =>
-        currentPreferences.map((preference) =>
-          preference.id === editingId
-            ? {
-                ...preference,
-                category: draft.category,
-                statement: trimmedStatement,
-                importance: draft.importance,
-                visibility: draft.visibility,
-                interpretation: undefined,
-                }
-            : preference
-        ),
-      );
-    } else {
+    setPreferences((currentPreferences)=>
+      currentPreferences.map((preference)=>{
+
+        if(preference.id !== editingId){
+          return preference;
+        }
+
+        const hasChanged =
+          preference.statement !== trimmedStatement ||
+          preference.category !== draft.category ||
+          preference.importance !== draft.importance ||
+          preference.visibility !== draft.visibility;
+
+        return {
+          ...preference,
+          category:draft.category,
+          statement:trimmedStatement,
+          importance:draft.importance,
+          visibility:draft.visibility,
+          interpretation: 
+            preference.interpretation,
+        };
+      })
+    );
+  } else {
       const newPreference: Preference = {
         id: crypto.randomUUID(),
         category: draft.category,
@@ -575,19 +621,234 @@ export default function RoomPage() {
     }
 
     resetDraft();
+    setIsPreferenceComposerOpen(false);
   }
 
-  
+  async function handleDistanceInterpret(preference: Preference) {
+
+
+
+        console.log("distance start");
+        const statement = preference.statement.trim();
+
+        if (!statement) {
+            return;
+        }
+
+        
+
+        try {
+            console.log("before fetch");
+            const response = await fetch(
+            "/api/interpret-distance",
+            {
+                method: "POST",
+                headers: {
+                "Content-Type": "application/json",
+                },
+                body: JSON.stringify({
+                statement,
+                }),
+            },
+            );
+
+            console.log("response status", response.status);
+
+            const data = (await response.json()) as
+            | DistanceInterpretationApiResult
+            | { error?: string };
+
+            console.log("API DATA", data);
+
+            if (!response.ok) {
+            const message =
+                "error" in data &&
+                typeof data.error === "string"
+                ? data.error
+                : "Could not interpret this preference.";
+
+            throw new Error(message);
+            }
+
+            if (!("status" in data)) {
+            throw new Error(
+                "The interpretation endpoint returned an invalid response.",
+            );
+            }
+
+            if (data.status === "success") {
+
+              const interpretation: PreferenceInterpretation = {
+                status: "success",
+                summary: data.summary,
+                structuredData: {
+                  maxDistanceMiles: data.maxMiles,
+                },
+                clarificationQuestion: null,
+                source: "ai",
+                confirmed: false,
+              };
+              console.log("NEW INTERPRETATION", interpretation);
+              console.log("TARGET ID", preference.id);
+
+
+              setPreferences((currentPreferences) => {
+              const next = currentPreferences.map((currentPreference) =>
+                currentPreference.id === preference.id
+                  ? {
+                      ...currentPreference,
+                      interpretation,
+                    }
+                  : currentPreference,
+              );
+
+              console.log("UPDATED PREFS", next);
+
+              return next;
+            });
+            } else {
+            const interpretation: PreferenceInterpretation = {
+              status: "needs_clarification",
+              summary: data.summary,
+              structuredData: {},
+              clarificationQuestion: data.clarificationQuestion,
+              source: "ai",
+              confirmed: false,
+            };
+
+            setPreferences((currentPreferences) =>
+              currentPreferences.map((currentPreference) =>
+                currentPreference.id === preference.id
+                  ? {
+                      ...currentPreference,
+                      interpretation,
+                    }
+                  : currentPreference,
+              ),
+            );
+            }
+        } catch (error) {
+            console.error(error);
+        } 
+    }
+
+  async function handleBudgetInterpret(preference: Preference) {
+        const statement =
+        preference.statement.trim();
+
+        if (!statement) {
+            return;
+        }
+
+       
+
+
+        try {
+        const response = await fetch(
+            "/api/interpret-budget",
+            {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+                statement,
+            }),
+            },
+        );
+
+        
+
+        const data = (await response.json()) as
+            | BudgetInterpretationApiResult
+            | {
+                error?: string;
+            };
+
+        console.log("BUDGET RAW DATA", data);
+
+        if (!response.ok) {
+            const message =
+            "error" in data &&
+            typeof data.error === "string"
+                ? data.error
+                : "Could not interpret this budget preference.";
+
+            throw new Error(message);
+        }
+
+        if (!("status" in data)) {
+            throw new Error(
+            "The budget endpoint returned an invalid response.",
+            );
+        }
+
+        if (data.status === "success") {
+            const interpretation: PreferenceInterpretation = {
+              status: "success",
+              summary: data.summary,
+
+              structuredData: {
+                minPriceDollarsPerPerson:
+                  data.minPriceDollarsPerPerson,
+
+                maxPriceDollarsPerPerson:
+                  data.maxPriceDollarsPerPerson,
+              },
+
+              clarificationQuestion: null,
+              source: "ai",
+              confirmed: false,
+            };
+
+
+            setPreferences((currentPreferences) =>
+              currentPreferences.map((currentPreference) =>
+                currentPreference.id === preference.id
+                  ? {
+                      ...currentPreference,
+                      interpretation,
+                    }
+                  : currentPreference
+              )
+            );
+
+        } else {
+            const interpretation: PreferenceInterpretation = {
+              status:"needs_clarification",
+              summary:data.summary,
+              structuredData:{},
+              clarificationQuestion:data.clarificationQuestion,
+              source:"ai",
+              confirmed:false,
+            };
+
+
+            setPreferences((currentPreferences)=>
+              currentPreferences.map((currentPreference)=>
+                currentPreference.id === preference.id
+                ? {
+                    ...currentPreference,
+                    interpretation,
+                  }
+                : currentPreference
+              )
+            );
+          }
+        } catch (error) {
+        console.error(error);
+        } 
+    }
 
     async function handleInterpret(preference: Preference) {
-        if (preference.category !== "distance") {
-            setInterpretErrors((currentErrors) => ({
-            ...currentErrors,
-            [preference.id]:
-                "Real interpretation currently supports Distance only.",
-            }));
 
-            return;
+        console.log("clicked", preference);
+        if (preference.category === "distance") {
+          return handleDistanceInterpret(preference);
+        }
+
+        if (preference.category === "budget") {
+            return handleBudgetInterpret(preference);
         }
 
         setInterpretingId(preference.id);
@@ -710,7 +971,13 @@ export default function RoomPage() {
     });
 
     setFormError("");
-    }   
+    setIsPreferenceComposerOpen(true)
+
+    window.scrollTo({
+    top: 0,
+    behavior: "smooth",
+    });
+}   
 
 
   function handleDeletePreference(preferenceId: string) {
@@ -734,32 +1001,25 @@ export default function RoomPage() {
             .maxDistanceMiles === "number",
     );
 
-    const evaluatedCandidates = confirmedDistancePreference
-    ? candidates.map((candidate) => ({
+
+  const rankedCandidates =
+  candidates
+    .map((candidate) => {
+      const score =
+      evaluateRestaurantScore(
         candidate,
-        evaluation: evaluateDistancePreference(
-            candidate,
-            confirmedDistancePreference,
-        ),
-        }))
-    : [];
+        preferences,
+      );
 
-    const sortedCandidates = [
-        ...evaluatedCandidates,
-        ].sort((first, second) => {
-        const statusDifference =
-            evaluationPriority[first.evaluation.status] -
-            evaluationPriority[second.evaluation.status];
-
-        if (statusDifference !== 0) {
-            return statusDifference;
-        }
-
-        return (
-            first.candidate.distanceMiles -
-            second.candidate.distanceMiles
-        );
-    });
+      return {
+        candidate,
+        ...score,
+      };
+    })
+    .sort(
+      (a, b) =>
+        b.totalScore - a.totalScore,
+    );
 
 
   if (!hasLoaded) {
@@ -783,422 +1043,360 @@ export default function RoomPage() {
         <main className="room-page">
             <PlanningBackground />
 
-            <section className="room-card">
-                <header className="mb-8 text-center">
-                    <p className="text-sm font-semibold uppercase tracking-widest text-purple-600">
-                    Local Agent
-                    </p>
 
-                    <h1 className="mt-3 text-4xl font-bold tracking-tight text-gray-900">
-                    What matters to you?
-                    </h1>
+            <section className="room-shell">
 
-                    <p className="mx-auto mt-3 max-w-lg leading-7 text-gray-600">
-                    Add your private preferences one at a time. They currently stay
-                    only on this page.
-                    </p>
+                <div className="mb-6 flex flex-wrap items-center gap-3 text-sm">
+                    <span className="rounded-full border border-purple-100 bg-white/80 px-4 py-2 text-gray-700">
+                        Starting point: {privateOriginAddress}
+                    </span>
+
+                    <span className="rounded-full border border-purple-100 bg-white/80 px-4 py-2 text-gray-700">
+                        {preferences.length} preferences
+                    </span>
+                </div>
+
+                <header className="workspace-header flex items-start justify-between gap-6">
+                    <div>
+                        <p className="text-sm font-semibold uppercase tracking-widest text-purple-600">
+                        Local Agent
+                        </p>
+
+                        <h1 className="mt-2 text-4xl font-bold tracking-tight text-gray-900">
+                        What matters to you?
+                        </h1>
+
+                        <p className="mt-2 text-gray-600">
+                        Review your constraints and explore recommendations.
+                        </p>
+                    </div>
+
+                    <button
+                        type="button"
+                        onClick={() =>
+                        setIsPreferenceComposerOpen((current) => !current)
+                        }
+                        className="shrink-0 rounded-2xl bg-purple-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-purple-700"
+                    >
+                        {isPreferenceComposerOpen
+                        ? "Close"
+                        : "+ Add preference"}
+                    </button>
                 </header>
 
-                <section className="mb-8 rounded-3xl border border-purple-100 bg-white p-6 shadow-sm">
-                    <div className="flex items-start gap-4">
-                        <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-purple-100 text-purple-700">
-                        ◎
+                {isPreferenceComposerOpen && (
+                    <form
+                        onSubmit={handlePreferenceSubmit}
+                        className="mb-6 rounded-3xl border border-white/80 bg-white/90 p-6 shadow-xl shadow-purple-100/50 backdrop-blur-xl"
+                    >
+                                            {/* Category and visibility */}
+                    <div className="grid gap-4 sm:grid-cols-2">
+                        <div>
+                        <label
+                            htmlFor="preference-category"
+                            className="mb-2 block text-sm font-semibold text-gray-800"
+                        >
+                            Category
+                        </label>
+
+                        <select
+                            id="preference-category"
+                            value={draft.category}
+                            onChange={(event) =>
+                            updateDraft(
+                                "category",
+                                event.target.value as PreferenceCategory,
+                            )
+                            }
+                            className="w-full rounded-2xl border border-gray-300 bg-gray-50 px-4 py-3 text-gray-900 outline-none transition focus:border-purple-500 focus:bg-white focus:ring-4 focus:ring-purple-100"
+                        >
+                            {selectedCategories.map((category) => (
+                              <option
+                                key={category}
+                                value={category}
+                              >
+                                {categoryLabels[category]}
+                              </option>
+                            ))}
+                        </select>
                         </div>
 
-                        <div className="min-w-0 flex-1">
-                        <p className="text-xs font-semibold uppercase tracking-widest text-purple-600">
-                            Private location
-                        </p>
-
-                        <h2 className="mt-1 text-xl font-semibold text-gray-900">
-                            Starting point
-                        </h2>
-
-                        <p className="mt-1 text-sm leading-6 text-gray-500">
-                            Used to generate and evaluate nearby options.
-                            This address is never shown to other participants.
-                        </p>
-
+                        <div>
                         <label
-                            htmlFor="private-origin-address"
-                            className="mt-5 block text-sm font-semibold text-gray-800"
+                            htmlFor="preference-visibility"
+                            className="mb-2 block text-sm font-semibold text-gray-800"
                         >
-                            Address
+                            Visibility
+                        </label>
+
+                        <select
+                            id="preference-visibility"
+                            value={draft.visibility}
+                            onChange={(event) =>
+                            updateDraft(
+                                "visibility",
+                                event.target.value as Visibility,
+                            )
+                            }
+                            className="w-full rounded-2xl border border-gray-300 bg-gray-50 px-4 py-3 text-gray-900 outline-none transition focus:border-purple-500 focus:bg-white focus:ring-4 focus:ring-purple-100"
+                        >
+                            {Object.entries(visibilityLabels).map(([value, label]) => (
+                            <option key={value} value={value}>
+                                {label}
+                            </option>
+                            ))}
+                        </select>
+                        </div>
+
+                        
+                    </div>
+
+                
+                    {/* Preference statement */}
+                    <div className="mt-5">
+                        <label
+                        htmlFor="preference"
+                        className="mb-2 block text-sm font-semibold text-gray-800"
+                        >
+                        Describe your preference
                         </label>
 
                         <input
-                            id="private-origin-address"
-                            type="text"
-                            value={privateOriginAddress}
-                            onChange={(event) =>
-                            setPrivateOriginAddress(event.target.value)
-                            }
-                            placeholder="For example: 3551 Trousdale Pkwy, Los Angeles"
-                            autoComplete="street-address"
-                            className="mt-2 w-full rounded-2xl border border-gray-300 bg-gray-50 px-4 py-3 text-gray-900 outline-none transition placeholder:text-gray-400 focus:border-purple-500 focus:bg-white focus:ring-4 focus:ring-purple-100"
+                        id="preference"
+                        value={draft.statement}
+                        onChange={(event) =>
+                            updateDraft("statement", event.target.value)
+                        }
+                        placeholder="For example: I would prefer Japanese food"
+                        className="w-full rounded-2xl border border-gray-300 bg-gray-50 px-4 py-3 text-gray-900 outline-none transition placeholder:text-gray-400 focus:border-purple-500 focus:bg-white focus:ring-4 focus:ring-purple-100"
                         />
 
-                        <p className="mt-2 text-xs text-gray-400">
-                            Stored in your local agent and sent only when
-                            generating options.
+                        {formError && (
+                        <p className="mt-2 text-sm text-red-600">
+                            {formError}
                         </p>
+                        )}
+                    </div>
+
+                        
+
+                    {/* Importance selection */}
+                    <fieldset className="mt-5">
+                        <legend className="text-sm font-semibold text-gray-800">
+                        How important is this?
+                        </legend>
+
+                        <div className="mt-3 grid grid-cols-5 gap-2">
+                        {([1, 2, 3, 4, 5] as Importance[]).map((importance) => {
+                            const selected = draft.importance === importance;
+
+                            return (
+                            <button
+                                key={importance}
+                                type="button"
+                                onClick={() =>
+                                updateDraft("importance", importance)
+                                }
+                                className={`rounded-2xl border py-3 font-semibold transition ${
+                                selected
+                                    ? "border-purple-600 bg-purple-600 text-white"
+                                    : "border-gray-200 bg-gray-50 text-gray-700 hover:border-purple-300 hover:bg-purple-50"
+                                }`}
+                            >
+                                {importance}
+                            </button>
+                            );
+                        })}
                         </div>
-                    </div>
-                </section>
 
-                <form
-                    onSubmit={handlePreferenceSubmit}
-                    className="rounded-3xl border border-gray-200 bg-white p-6 shadow-xl shadow-purple-100/50"
-                >
-                {/* Category and visibility */}
-                <div className="grid gap-4 sm:grid-cols-2">
-                    <div>
-                    <label
-                        htmlFor="preference-category"
-                        className="mb-2 block text-sm font-semibold text-gray-800"
-                    >
-                        Category
-                    </label>
+                        <p className="mt-3 text-sm font-medium text-purple-700">
+                        {importanceLabels[draft.importance]}
+                        </p>
+                    </fieldset>
 
-                    <select
-                        id="preference-category"
-                        value={draft.category}
-                        onChange={(event) =>
-                        updateDraft(
-                            "category",
-                            event.target.value as PreferenceCategory,
-                        )
-                        }
-                        className="w-full rounded-2xl border border-gray-300 bg-gray-50 px-4 py-3 text-gray-900 outline-none transition focus:border-purple-500 focus:bg-white focus:ring-4 focus:ring-purple-100"
-                    >
-                        {Object.entries(categoryLabels).map(([value, label]) => (
-                        <option key={value} value={value}>
-                            {label}
-                        </option>
-                        ))}
-                    </select>
-                    </div>
-
-                    <div>
-                    <label
-                        htmlFor="preference-visibility"
-                        className="mb-2 block text-sm font-semibold text-gray-800"
-                    >
-                        Visibility
-                    </label>
-
-                    <select
-                        id="preference-visibility"
-                        value={draft.visibility}
-                        onChange={(event) =>
-                        updateDraft(
-                            "visibility",
-                            event.target.value as Visibility,
-                        )
-                        }
-                        className="w-full rounded-2xl border border-gray-300 bg-gray-50 px-4 py-3 text-gray-900 outline-none transition focus:border-purple-500 focus:bg-white focus:ring-4 focus:ring-purple-100"
-                    >
-                        {Object.entries(visibilityLabels).map(([value, label]) => (
-                        <option key={value} value={value}>
-                            {label}
-                        </option>
-                        ))}
-                    </select>
-                    </div>
-
-                    
-                </div>
-
-               
-                {/* Preference statement */}
-                <div className="mt-5">
-                    <label
-                    htmlFor="preference"
-                    className="mb-2 block text-sm font-semibold text-gray-800"
-                    >
-                    Describe your preference
-                    </label>
-
-                    <input
-                    id="preference"
-                    value={draft.statement}
-                    onChange={(event) =>
-                        updateDraft("statement", event.target.value)
-                    }
-                    placeholder="For example: I would prefer Japanese food"
-                    className="w-full rounded-2xl border border-gray-300 bg-gray-50 px-4 py-3 text-gray-900 outline-none transition placeholder:text-gray-400 focus:border-purple-500 focus:bg-white focus:ring-4 focus:ring-purple-100"
-                    />
-
-                    {formError && (
-                    <p className="mt-2 text-sm text-red-600">
-                        {formError}
-                    </p>
-                    )}
-                </div>
-
-                    
-
-                {/* Importance selection */}
-                <fieldset className="mt-5">
-                    <legend className="text-sm font-semibold text-gray-800">
-                    How important is this?
-                    </legend>
-
-                    <div className="mt-3 grid grid-cols-5 gap-2">
-                    {([1, 2, 3, 4, 5] as Importance[]).map((importance) => {
-                        const selected = draft.importance === importance;
-
-                        return (
+                        <div className="mt-6 flex gap-3">
                         <button
-                            key={importance}
-                            type="button"
-                            onClick={() =>
-                            updateDraft("importance", importance)
-                            }
-                            className={`rounded-2xl border py-3 font-semibold transition ${
-                            selected
-                                ? "border-purple-600 bg-purple-600 text-white"
-                                : "border-gray-200 bg-gray-50 text-gray-700 hover:border-purple-300 hover:bg-purple-50"
-                            }`}
+                            type="submit"
+                            className="flex-1 rounded-2xl bg-purple-600 px-6 py-3 font-semibold text-white transition hover:bg-purple-700"
                         >
-                            {importance}
+                            {editingId
+                            ? "Update preference"
+                            : "Add preference"}
                         </button>
-                        );
-                    })}
-                    </div>
 
-                    <p className="mt-3 text-sm font-medium text-purple-700">
-                    {importanceLabels[draft.importance]}
-                    </p>
-                </fieldset>
+                        <button
+                            type="button"
+                            onClick={() => {
+                            resetDraft();
+                            setIsPreferenceComposerOpen(false);
+                            }}
+                            className="rounded-2xl border border-gray-200 bg-white px-5 py-3 font-semibold text-gray-600 transition hover:bg-gray-50"
+                        >
+                            Cancel
+                        </button>
+                        </div>
+                    </form>
+                    )}
+                
 
 
-                <button
-                    type="submit"
-                    className="mt-6 w-full rounded-2xl bg-purple-600 px-6 py-3 font-semibold text-white shadow-sm transition hover:-translate-y-0.5 hover:bg-purple-700 hover:shadow-md"
-                >
-                    {editingId ? "Update preference" : "Add preference"}
-                </button>
-                </form>
+                <div className = "room-workspace">
+                    <aside
+                    className="
+                    room-sidebar
+                    sticky
+                    top-6
+                    h-fit
+                    "
+                    >
+                    <section className="mt-8">
+                        <div className="mb-4 flex items-center justify-between">
+                        <h2 className="text-xl font-semibold text-gray-900">
+                            Your preferences
+                        </h2>
 
-                <section className="mt-8">
-                    <div className="mb-4 flex items-center justify-between">
-                    <h2 className="text-xl font-semibold text-gray-900">
-                        Your preferences
-                    </h2>
-
-                    <span className="rounded-full bg-purple-100 px-3 py-1 text-sm font-medium text-purple-700">
-                        {preferences.length}
-                    </span>
-                    </div>
-
-                    {preferences.length === 0 ? (
-                    <div className="rounded-3xl border border-dashed border-purple-300 bg-white/70 px-6 py-12 text-center">
-                        <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-purple-100 text-xl">
-                        ✦
+                        <span className="rounded-full bg-purple-100 px-3 py-1 text-sm font-medium text-purple-700">
+                            {preferences.length}
+                        </span>
                         </div>
 
-                        <p className="mt-4 font-medium text-gray-700">
-                        Your local section is empty.
-                        </p>
-
-                        <p className="mt-1 text-sm text-gray-500">
-                        Add your first preference above.
-                        </p>
-                    </div>
-                    ) : (
-                    <div className="space-y-3">
-                        {preferences.map((preference, index) => (
-                        <article
-                        key={preference.id}
-                        className="relative rounded-2xl border border-gray-200 bg-white p-6 pr-28 shadow-sm transition hover:-translate-y-0.5 hover:border-purple-200 hover:shadow-md"
-                        >
-                            <div className="absolute right-4 top-4 flex gap-2">
-                                <button
-                                    type="button"
-                                    onClick={() => handleEditPreference(preference)}
-                                    aria-label="Edit preference"
-                                    className="flex h-9 w-9 items-center justify-center rounded-full text-gray-400 transition hover:bg-purple-50 hover:text-purple-700"
-                                >
-                                    <svg
-                                    viewBox="0 0 24 24"
-                                    fill="none"
-                                    stroke="red"
-                                    strokeWidth="2.4"
-                                    className="h-4 w-4"
-                                    >
-                                    <path d="M12 20h9" />
-                                    <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L8 18l-4 1 1-4Z" />
-                                    </svg>
-                                </button>
-
-                                <button
-                                    type="button"
-                                    onClick={() => handleDeletePreference(preference.id)}
-                                    aria-label="Delete preference"
-                                    className="flex h-9 w-9 items-center justify-center rounded-full text-gray-400 transition hover:bg-red-50 hover:text-red-600"
-                                >
-                                    <svg
-                                    viewBox="0 0 24 24"
-                                    fill="none"
-                                    stroke="red"
-                                    strokeWidth="1.8"
-                                    className="h-4 w-4"
-                                    >
-                                    <path d="M3 6h18" />
-                                    <path d="M8 6V4h8v2" />
-                                    <path d="M19 6l-1 14H6L5 6" />
-                                    <path d="M10 10v6M14 10v6" />
-                                    </svg>
-                                </button>
+                        {preferences.length === 0 ? (
+                        <div className="rounded-3xl border border-dashed border-purple-300 bg-white/70 px-6 py-12 text-center">
+                            <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-purple-100 text-xl">
+                            ✦
                             </div>
 
-                            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-purple-100 text-sm font-bold text-purple-700">
-                            {index + 1}
-                            </span>
-                            <div>
-                                <p className="break-words leading-7 text-gray-800">
-                                    {preference.statement}
-                                </p>
-                                <div className="mt-3 flex flex-wrap gap-2">
-                                    <span className="rounded-full bg-purple-100 px-3 py-1 text-xs font-semibold text-purple-700">
-                                        {categoryLabels[preference.category]}
-                                    </span>
+                            <p className="mt-4 font-medium text-gray-700">
+                            Your local section is empty.
+                            </p>
 
-                                    <span className="rounded-full bg-green-100 px-3 py-1 text-xs font-semibold text-green-700">
-                                        {preference.importance}/5 ·{" "}
-                                        {importanceLabels[preference.importance]}
-                                    </span>
+                            <p className="mt-1 text-sm text-gray-500">
+                            Add your first preference above.
+                            </p>
+                        </div>
+                        ) : (
+                        <div className="space-y-3">
+                            {preferences.map((preference, index) => {
 
-                                    <span className="rounded-full bg-gray-100 px-3 py-1 text-xs font-semibold text-gray-600">
-                                        {visibilityLabels[preference.visibility]}
-                                    </span>
-                                    
+
+                                return (
+
+                                <article
+                                key={preference.id}
+
+                                // onClick={() =>
+                                //   handleEditPreference(preference)
+                                // }
+
+                                // className="
+                                // cursor-pointer
+                                // rounded-2xl
+                                // border
+                                // border-gray-200
+                                // bg-white
+                                // p-6
+                                // shadow-sm
+                                // transition
+                                // hover:border-purple-300
+                                // hover:shadow-md
+                                // "
+                                // >
+
+                              
+                                className="
+                                rounded-2xl
+                                border
+                                border-gray-200
+                                bg-white
+                                p-5
+                                shadow-sm
+                                "
+                                >
+
+
+                                <div className="flex items-start justify-between">
+
+
+
+                                  <div className="flex items-start gap-3">
+
+                                  <span>
+                                    {index+1}
+                                  </span>
+
+                                  <div>
+
+                                  <h3 className="
+                                  font-semibold
+                                  text-gray-900
+                                  ">
+                                  {categoryLabels[preference.category]}
+                                  </h3>
+
+                                {renderPreferenceDetails(preference)}
+
                                 </div>
 
-                                {!preference.interpretation && (
-                                    <div className="mt-4">
-                                        <button
-                                        type="button"
-                                        onClick={() => handleInterpret(preference)}
-                                        className="inline-flex items-center gap-2 text-sm font-semibold text-purple-600 transition hover:text-purple-800"
-                                        >
-                                        <span>✦</span>
-                                        Interpret with agent
-                                        </button>
-                                    </div>
+
+                                </div>
+                                <div className="flex items-center gap-4">
+
+                                {(preference.category === "distance" || preference.category === "budget") && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleInterpret(preference)}
+                                    className="
+                                      text-sm
+                                      font-semibold
+                                      text-purple-600
+                                    "
+                                  >
+                                    ✦ Reinterpret
+                                  </button>
                                 )}
 
-                                {interpretErrors[preference.id] && (
-                                    <div className="mt-3 rounded-xl border border-red-100 bg-red-50 px-4 py-3">
-                                        <p className="text-sm font-medium text-red-700">
-                                        {interpretErrors[preference.id]}
-                                        </p>
-                                    </div>
-                                )}
+
+                                <button
+                                  type="button"
+                                  onClick={() => handleEditPreference(preference)}
+                                  className="
+                                    text-sm
+                                    font-semibold
+                                    text-gray-500
+                                  "
+                                >
+                                  ✎ Edit
+                                </button>
+
+                              </div>
+
                                 
 
-
-                                {preference.interpretation && (
-                                    <div className="mt-5 overflow-hidden rounded-2xl border border-purple-100 bg-gradient-to-r from-purple-50/80 to-blue-50/70">
-                                        <div className="flex flex-wrap items-center justify-between gap-4 px-5 py-4">
-                                        <div className="flex min-w-0 items-center gap-4">
-                                            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-white text-lg text-purple-600 shadow-sm">
-                                            ✦
-                                            </div>
-
-                                            <div className="min-w-0">
-                                            <p className="text-xs font-semibold uppercase tracking-widest text-purple-600">
-                                                Agent understood
-                                            </p>
-
-                                            <p className="mt-1 truncate font-medium text-gray-900">
-                                                {preference.interpretation.summary}
-                                            </p>
-                                            </div>
-                                        </div>
-
-                                        {preference.interpretation.status ===
-                                            "needs_clarification" &&
-                                            preference.interpretation.clarificationQuestion && (
-                                                <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
-                                                <p className="text-xs font-semibold uppercase tracking-wide text-amber-700">
-                                                    Agent needs one detail
-                                                </p>
-
-                                                <p className="mt-1 text-sm text-amber-900">
-                                                    {
-                                                    preference.interpretation
-                                                        .clarificationQuestion
-                                                    }
-                                                </p>
-
-                                                <button
-                                                    type="button"
-                                                    onClick={() =>
-                                                    handleEditPreference(preference)
-                                                    }
-                                                    className="mt-3 text-sm font-semibold text-amber-800 hover:text-amber-950"
-                                                >
-                                                    Edit preference
-                                                </button>
-                                                </div>
-                                            )}
-
-                                        <div className="flex shrink-0 items-center gap-3">
-                                        {preference.interpretation.status === "success" && !preference.interpretation.confirmed && (
-                                            <button
-                                            type="button"
-                                            onClick={() =>
-                                                handleConfirmInterpretation(preference.id)
-                                            }
-                                            className="rounded-xl bg-purple-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-purple-700"
-                                            >
-                                            Confirm
-                                            </button>
-                                        )}
-                                        </div>  
-
-                                        <button
-                                            type="button"
-                                            onClick={() => handleInterpret(preference)}
-                                            className="shrink-0 text-sm font-semibold text-purple-600 transition hover:text-purple-800"
-                                        >
-                                            Re-interpret
-                                        </button>
-                                        </div>
-
-                                        {typeof preference.interpretation.structuredData
-                                        .maxDistanceMiles === "number" && (
-                                        <div className="border-t border-purple-100/80 bg-white/60 px-5 py-3">
-                                            <div className="flex items-center justify-between gap-4">
-                                            <span className="text-sm text-gray-500">
-                                                Maximum distance
-                                            </span>
-
-                                            <span className="rounded-lg bg-white px-3 py-1.5 text-sm font-semibold text-gray-800 shadow-sm">
-                                                {
-                                                preference.interpretation.structuredData
-                                                    .maxDistanceMiles
-                                                }{" "}
-                                                miles
-                                            </span>
-                                            </div>
-                                        </div>
-                                        )}
-                                    </div>
-                                    )}
                                 
-                            </div>
 
-                            
-                        </article>
-                        ))}
+                              </div>
+                            </article>
+                            );
+
+                                 
+
+                                
+
+                                
+                                
+                           })}
+                        
+                    
                     </div>
-                    )}
+                  )};
+                
                 </section>
-
-                    <section className="relative mt-8 overflow-hidden rounded-3xl bg-gray-950 p-6 text-white shadow-2xl shadow-purple-950/20">
+                          
+                </aside>
+                
+                
+                <section className="room-results">
+                   <section className="candidate-lab relative overflow-hidden rounded-3xl bg-gray-950 p-6 text-white shadow-2xl shadow-purple-950/20">
                         {/* Decorative glows */}
                         <div className="pointer-events-none absolute -right-20 -top-24 h-72 w-72 rounded-full bg-purple-600/25 blur-3xl" />
                         <div className="pointer-events-none absolute -bottom-28 -left-20 h-72 w-72 rounded-full bg-blue-500/15 blur-3xl" />
@@ -1215,8 +1413,7 @@ export default function RoomPage() {
                                 </h2>
 
                                 <p className="mt-2 max-w-xl text-sm leading-6 text-gray-400">
-                                Your local agent evaluates each option using your
-                                confirmed distance preference.
+                                Your local agent evaluates each option using your confirmed preferences.
                                 </p>
                             </div>
 
@@ -1228,7 +1425,7 @@ export default function RoomPage() {
                                 <button
                                     type="button"
                                     onClick={handleGenerateCandidates}
-                                    disabled={isGeneratingCandidates || !confirmedDistancePreference}
+                                    disabled={isGeneratingCandidates || preferences.length===0}
                                     className="rounded-xl bg-purple-500 px-4 py-2 text-sm font-semibold text-white transition hover:bg-purple-400 disabled:cursor-not-allowed disabled:opacity-60"
                                 >
                                     {isGeneratingCandidates
@@ -1276,8 +1473,8 @@ export default function RoomPage() {
                             </div>
                             ) : (
                             <div className="mt-6 grid gap-4 lg:grid-cols-3">
-                                {sortedCandidates.map(
-                                ({ candidate, evaluation }, index) => (
+                                {rankedCandidates.map(
+                                ({ candidate, totalScore, breakdown}, index) => (
                                     <article
                                     key={candidate.id}
                                     className="group relative overflow-hidden rounded-2xl border border-white/10 bg-white/[0.07] p-5 backdrop-blur-sm transition hover:-translate-y-1 hover:border-purple-400/40 hover:bg-white/[0.1]"
@@ -1290,6 +1487,11 @@ export default function RoomPage() {
                                         <span className="rounded-full bg-white/10 px-3 py-1 text-xs font-semibold text-gray-200">
                                         {candidate.distanceMiles} miles
                                         </span>
+
+                                        <p className="mt-1 text-sm text-gray-400">
+                                        ${candidate.estimatedPriceMin}-
+                                        ${candidate.estimatedPriceMax} / person
+                                      </p>
                                     </div>
 
                                     <h3 className="mt-5 text-lg font-semibold text-white">
@@ -1301,31 +1503,45 @@ export default function RoomPage() {
                                     </p>
 
                                     <div className="mt-5">
-                                        <span
-                                        className={`inline-flex rounded-full border px-3 py-1 text-xs font-semibold ${
-                                            evaluationStyles[evaluation.status]
-                                        }`}
-                                        >
-                                        {evaluationLabels[evaluation.status]}
-                                        </span>
-                                    </div>
+                                      <span
+                                      className="
+                                      inline-flex
+                                      rounded-full
+                                      bg-purple-500/20
+                                      px-3
+                                      py-1
+                                      text-xs
+                                      font-semibold
+                                      text-purple-200
+                                      "
+                                      >
+                                          Score {Math.round(totalScore * 100)}%
+                                      </span>
+                                  </div>
 
-                                    <p className="mt-4 text-sm leading-6 text-gray-300">
-                                        {evaluation.privateReason}
-                                    </p>
+                                  <div className="mt-4 space-y-2">
+                                  {
+                                  breakdown.map((item)=>(
+                                      <div
+                                      key={item.category}
+                                      className="
+                                      flex
+                                      justify-between
+                                      text-sm
+                                      text-gray-300
+                                      "
+                                      >
+                                          <span>
+                                              {item.category}
+                                          </span>
 
-                                    {"excessMiles" in evaluation &&
-                                        evaluation.excessMiles > 0 && (
-                                        <div className="mt-4 border-t border-white/10 pt-4">
-                                            <p className="text-xs font-medium text-gray-400">
-                                            Exceeds preference by
-                                            </p>
-
-                                            <p className="mt-1 font-semibold text-white">
-                                            {evaluation.excessMiles} miles
-                                            </p>
-                                        </div>
-                                        )}
+                                          <span>
+                                              {Math.round(item.score * 100)}%
+                                          </span>
+                                      </div>
+                                  ))
+                                  }
+                                  </div>
 
                                     <p className="mt-4 text-xs text-gray-500">
                                         Evaluated privately on this device
@@ -1337,6 +1553,11 @@ export default function RoomPage() {
                             )}
                         </div>
                         </section>
+                </section>
+
+                </div>
+
+                    
                 </section>
             </main>
         );

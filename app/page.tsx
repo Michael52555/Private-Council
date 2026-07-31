@@ -94,7 +94,11 @@ export default function Home() {
       name: trimmedName,
     });
 
-    router.push(`/room/${roomId}?${query.toString()}`);
+    router.push(
+    `/room/${roomId}/setup?name=${encodeURIComponent(
+      planName,
+    )}`,
+  );;
   }
 
   return (

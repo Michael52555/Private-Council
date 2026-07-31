@@ -1,12 +1,5 @@
 import { NextResponse } from "next/server";
 
-type RestaurantCandidate = {
-  id: string;
-  name: string;
-  address: string;
-  distanceMiles: number;
-};
-
 const mockCoordinatorCandidates: RestaurantCandidate[] = [
   {
     id: "restaurant-1",
@@ -113,6 +106,177 @@ async function geocodeAddress(
   };
 }
 
+type GoogleNearbyPlace = {
+  id?: string;
+
+  displayName?: {
+    text?: string;
+  };
+
+  formattedAddress?: string;
+
+  location?: {
+    latitude?: number;
+    longitude?: number;
+  };
+};
+
+type GoogleNearbySearchResponse = {
+  places?: GoogleNearbyPlace[];
+
+  error?: {
+    message?: string;
+  };
+};
+
+type RestaurantCandidate = {
+  id: string;
+  name: string;
+  address: string;
+  distanceMiles: number;
+};
+
+function degreesToRadians(degrees: number): number {
+  return degrees * (Math.PI / 180);
+}
+
+function calculateDistanceMiles(
+  originLatitude: number,
+  originLongitude: number,
+  destinationLatitude: number,
+  destinationLongitude: number,
+): number {
+  const earthRadiusMiles = 3958.8;
+
+  const latitudeDifference = degreesToRadians(
+    destinationLatitude - originLatitude,
+  );
+
+  const longitudeDifference = degreesToRadians(
+    destinationLongitude - originLongitude,
+  );
+
+  const originLatitudeRadians =
+    degreesToRadians(originLatitude);
+
+  const destinationLatitudeRadians =
+    degreesToRadians(destinationLatitude);
+
+  const haversineValue =
+    Math.sin(latitudeDifference / 2) ** 2 +
+    Math.cos(originLatitudeRadians) *
+      Math.cos(destinationLatitudeRadians) *
+      Math.sin(longitudeDifference / 2) ** 2;
+
+  const angularDistance =
+    2 *
+    Math.atan2(
+      Math.sqrt(haversineValue),
+      Math.sqrt(1 - haversineValue),
+    );
+
+  const distanceMiles =
+    earthRadiusMiles * angularDistance;
+
+  return Math.round(distanceMiles * 10) / 10;
+}
+
+async function searchNearbyRestaurants(
+  origin: GeocodedOrigin,
+): Promise<RestaurantCandidate[]> {
+  const apiKey = process.env.GOOGLE_MAPS_API_KEY;
+
+  if (!apiKey) {
+    throw new Error(
+      "GOOGLE_MAPS_API_KEY is not configured.",
+    );
+  }
+
+  const response = await fetch(
+    "https://places.googleapis.com/v1/places:searchNearby",
+    {
+      method: "POST",
+
+      headers: {
+        "Content-Type": "application/json",
+        "X-Goog-Api-Key": apiKey,
+        "X-Goog-FieldMask":
+          "places.id,places.displayName,places.formattedAddress,places.location",
+      },
+
+      body: JSON.stringify({
+        includedTypes: ["restaurant"],
+        maxResultCount: 10,
+        rankPreference: "DISTANCE",
+
+        locationRestriction: {
+          circle: {
+            center: {
+              latitude: origin.latitude,
+              longitude: origin.longitude,
+            },
+
+            // Approximately five miles.
+            radius: 8000,
+          },
+        },
+      }),
+
+      cache: "no-store",
+    },
+  );
+
+  const data =
+    (await response.json()) as GoogleNearbySearchResponse;
+
+  if (!response.ok) {
+    throw new Error(
+      data.error?.message ??
+        `Nearby restaurant search failed with status ${response.status}.`,
+    );
+  }
+
+  const places = data.places ?? [];
+
+  const candidates: RestaurantCandidate[] = [];
+
+  for (const place of places) {
+    const id = place.id;
+    const name = place.displayName?.text;
+    const latitude = place.location?.latitude;
+    const longitude = place.location?.longitude;
+
+    if (
+      typeof id !== "string" ||
+      typeof name !== "string" ||
+      typeof latitude !== "number" ||
+      !Number.isFinite(latitude) ||
+      typeof longitude !== "number" ||
+      !Number.isFinite(longitude)
+    ) {
+      continue;
+    }
+
+    candidates.push({
+      id,
+      name,
+
+      address:
+        place.formattedAddress ??
+        "Address unavailable",
+
+      distanceMiles: calculateDistanceMiles(
+        origin.latitude,
+        origin.longitude,
+        latitude,
+        longitude,
+      ),
+    });
+  }
+
+  return candidates;
+}
+
 export async function POST(request: Request) {
   try {
     
@@ -159,14 +323,53 @@ export async function POST(request: Request) {
       );
     }
 
-    return NextResponse.json({
-      candidates: mockCoordinatorCandidates,
-      meta: {
-        originResolved: true,
-        formattedOrigin:
-          geocodedOrigin.formattedAddress,
-      },
-    });
+    const candidates =
+      await searchNearbyRestaurants(geocodedOrigin);
+
+    // return NextResponse.json({
+    //   candidates,
+
+    //   meta: {
+    //     originResolved: true,
+
+    //     // Temporary debugging information.
+    //     formattedOrigin:
+    //       geocodedOrigin.formattedAddress,
+    //   },
+    // });
+
+    
+      return Response.json({
+        candidates : [
+        {
+          id:"1",
+          name:"Sushi Gen",
+          address:"Downtown LA",
+          distanceMiles:2,
+          estimatedPriceMin:60,
+          estimatedPriceMax:120,
+        },
+
+        {
+          id:"2",
+          name:"Ramen Spot",
+          address:"Koreatown",
+          distanceMiles:8,
+          estimatedPriceMin:15,
+          estimatedPriceMax:30,
+        },
+
+        {
+          id:"3",
+          name:"Luxury Steakhouse",
+          address:"Beverly Hills",
+          distanceMiles:5,
+          estimatedPriceMin:150,
+          estimatedPriceMax:300,
+        },
+        ]
+      });
+    
     
 
     if (!planName) {
