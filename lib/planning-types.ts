@@ -1,3 +1,5 @@
+import type { OrderingSource } from "@/lib/menu/types";
+
 export type Importance =
   | 1
   | 2
@@ -66,6 +68,12 @@ export type RestaurantCandidate = CandidatePlan & {
 
   estimatedPriceMin: number;
   estimatedPriceMax: number;
+  priceLevel?: string;
+  rating?: number;
+  userRatingCount?: number;
+  websiteUri?: string;
+  googleMapsUri?: string;
+  orderingSources: OrderingSource[];
 };
 
 export type Preference = {
