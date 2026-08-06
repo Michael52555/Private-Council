@@ -102,7 +102,19 @@ export async function extractRestaurantMenus(input: {
   // Keep browser-heavy providers sequential so one request does not fan out into
   // several Chromium sessions at once.
   for (const source of input.sources.slice(0, 5)) {
-    menus.push(await extractMenuFromSource(source));
+    const menu = await extractMenuFromSource(source);
+    menus.push(menu);
+
+    const pricedItemCount = menu.items.filter(
+      (item) => typeof item.price === "number",
+    ).length;
+
+    // One reliable ordering source is enough to price this restaurant. Keep
+    // the remaining discovered URLs as sources, but avoid rendering redundant
+    // provider copies of the same menu.
+    if (pricedItemCount >= 3) {
+      break;
+    }
   }
 
   const items = menus.flatMap((menu) => menu.items);
