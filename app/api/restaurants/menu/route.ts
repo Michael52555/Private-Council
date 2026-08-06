@@ -3,6 +3,7 @@ import { extractRestaurantMenus } from "@/lib/menu/extractor";
 import type { OrderingSource } from "@/lib/menu/types";
 
 export const runtime = "nodejs";
+export const maxDuration = 60;
 
 function isOrderingSource(value: unknown): value is OrderingSource {
   if (typeof value !== "object" || value === null) return false;
