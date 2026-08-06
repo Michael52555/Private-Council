@@ -252,9 +252,12 @@ export default function SetupPage() {
         const savedAddress =
             parsedState.privateOriginAddress.trim();
 
+        // Restoring an external localStorage snapshot is the purpose of this effect.
+        /* eslint-disable react-hooks/set-state-in-effect */
         setConfirmedOriginAddress(savedAddress);
         setOriginAddressDraft(savedAddress);
         setIsEditingOrigin(false);
+        /* eslint-enable react-hooks/set-state-in-effect */
         }
     } catch (error) {
         console.error(
@@ -1227,7 +1230,7 @@ export default function SetupPage() {
                             </h3>
 
                             <p className="mt-2 text-sm leading-6 text-gray-500">
-                            Describe the price range you would feel comfortable with for one person's meal.
+                            Describe the price range you would feel comfortable with for one person&apos;s meal.
                             </p>
 
                             <input
