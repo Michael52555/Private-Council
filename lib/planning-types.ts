@@ -56,9 +56,15 @@ export type CandidatePlan = {
   id: string;
   name: string;
   distanceMiles: number;
-  pricePerPerson: number;
+  pricePerPerson: number | null;
 
 };
+
+export type MenuEnrichmentStatus =
+  | "pending"
+  | "loading"
+  | "loaded"
+  | "unavailable";
 
 export type RestaurantCandidate = CandidatePlan & {
   id: string;
@@ -66,8 +72,10 @@ export type RestaurantCandidate = CandidatePlan & {
   address: string;
   distanceMiles: number;
 
-  estimatedPriceMin: number;
-  estimatedPriceMax: number;
+  estimatedPriceMin: number | null;
+  estimatedPriceMax: number | null;
+  menuStatus: MenuEnrichmentStatus;
+  menuItemCount: number;
   priceLevel?: string;
   rating?: number;
   userRatingCount?: number;
