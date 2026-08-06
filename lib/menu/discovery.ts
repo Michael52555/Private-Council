@@ -1,8 +1,9 @@
 import { discoverGoogleOrderingLinks, BrowserNotConfiguredError, isBrowserConfigured } from "@/lib/menu/browser";
-import { discoverOrderLinksFromHtml } from "@/lib/menu/html";
-import { dedupeSources, makeOrderingSource } from "@/lib/menu/providers";
-import { fetchPublicHtml } from "@/lib/menu/security";
-import type { OrderingSource } from "@/lib/menu/types";
+import { makeOrderingSource } from "@/lib/menu/providers";
+import type {
+  OrderingDiscoveryDiagnostics,
+  OrderingSource,
+} from "@/lib/menu/types";
 
 type GooglePlaceDetails = {
   id?: string;
@@ -22,7 +23,9 @@ export type OrderingDiscoveryResult = {
     googleMapsUri: string;
   };
   sources: OrderingSource[];
+  websiteFallbackSources: OrderingSource[];
   warnings: string[];
+  diagnostics: OrderingDiscoveryDiagnostics;
 };
 
 async function fetchPlaceDetails(placeId: string): Promise<GooglePlaceDetails> {
@@ -61,34 +64,35 @@ export async function discoverOrderingSources(input: {
     input.googleMapsUri ??
     details.googleMapsUri ??
     `https://www.google.com/maps/place/?q=place_id:${encodeURIComponent(input.placeId)}`;
-  const sources: OrderingSource[] = [];
+  let sources: OrderingSource[] = [];
+  const websiteFallbackSources: OrderingSource[] = [];
   const warnings: string[] = [];
+  let diagnostics: OrderingDiscoveryDiagnostics = {
+    browserConfigured: false,
+    orderControlFound: false,
+    resultScope: "none",
+    inspectedLinkCount: 0,
+    unresolvedControlLabels: [],
+  };
 
   if (websiteUri) {
-    sources.push(
+    websiteFallbackSources.push(
       makeOrderingSource({
         url: websiteUri,
-        label: "Restaurant website",
+        label: "Restaurant website fallback",
         provider: "restaurant_website",
         discoveredFrom: "place_details",
+        discoveryMethod: "website_fallback",
       }),
     );
-
-    try {
-      const { html, finalUrl } = await fetchPublicHtml(websiteUri);
-      sources.push(...discoverOrderLinksFromHtml(html, finalUrl));
-    } catch (error) {
-      warnings.push(
-        error instanceof Error
-          ? `Restaurant website discovery failed: ${error.message}`
-          : "Restaurant website discovery failed.",
-      );
-    }
   }
 
   if (isBrowserConfigured()) {
     try {
-      sources.push(...(await discoverGoogleOrderingLinks(googleMapsUri)));
+      const googleDiscovery = await discoverGoogleOrderingLinks(googleMapsUri);
+      sources = googleDiscovery.sources;
+      warnings.push(...googleDiscovery.warnings);
+      diagnostics = googleDiscovery.diagnostics;
     } catch (error) {
       warnings.push(
         error instanceof Error
@@ -99,7 +103,7 @@ export async function discoverOrderingSources(input: {
   } else {
     warnings.push(
       new BrowserNotConfiguredError().message +
-        " Restaurant-website menu links were still discovered without a browser.",
+        " Google Maps ordering sources could not be inspected.",
     );
   }
 
@@ -111,7 +115,9 @@ export async function discoverOrderingSources(input: {
       websiteUri,
       googleMapsUri,
     },
-    sources: dedupeSources(sources),
+    sources,
+    websiteFallbackSources,
     warnings,
+    diagnostics,
   };
 }

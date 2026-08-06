@@ -1,5 +1,4 @@
 import { NextResponse } from "next/server";
-import { makeOrderingSource } from "@/lib/menu/providers";
 import type { RestaurantCandidate } from "@/lib/planning-types";
 
 type GeocodedOrigin = {
@@ -169,16 +168,7 @@ async function searchNearbyRestaurants(
       userRatingCount: place.userRatingCount,
       websiteUri: place.websiteUri,
       googleMapsUri: place.googleMapsUri,
-      orderingSources: place.websiteUri
-        ? [
-            makeOrderingSource({
-              url: place.websiteUri,
-              label: "Restaurant website",
-              provider: "restaurant_website",
-              discoveredFrom: "place_details",
-            }),
-          ]
-        : [],
+      orderingSources: [],
     });
   }
 

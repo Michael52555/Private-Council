@@ -15,6 +15,9 @@ const PROVIDERS: Array<{
   { provider: "grubhub", label: "Grubhub", hostnames: ["grubhub.com"] },
   { provider: "toast", label: "Toast", hostnames: ["toasttab.com"] },
   { provider: "chownow", label: "ChowNow", hostnames: ["chownow.com"] },
+  { provider: "olo", label: "Olo", hostnames: ["olo.com", "olo.express"] },
+  { provider: "square", label: "Square", hostnames: ["square.site", "squareup.com"] },
+  { provider: "clover", label: "Clover", hostnames: ["clover.com"] },
   {
     provider: "google_ordering",
     label: "Google ordering",
@@ -49,17 +52,25 @@ export function inferFulfillment(text: string): FulfillmentMethod {
 }
 
 export function unwrapGoogleRedirect(rawUrl: string): string {
-  const url = new URL(rawUrl);
-  if (!hostnameMatches(url.hostname, "google.com")) return url.toString();
+  let current = new URL(rawUrl);
 
-  for (const key of ["q", "url", "continue"]) {
-    const target = url.searchParams.get(key);
-    if (target?.startsWith("http://") || target?.startsWith("https://")) {
-      return target;
+  for (let depth = 0; depth < 3; depth += 1) {
+    if (!hostnameMatches(current.hostname, "google.com")) return current.toString();
+
+    let target: string | null = null;
+    for (const key of ["q", "url", "continue", "adurl", "redirect", "redirect_uri", "target", "u"]) {
+      const candidate = current.searchParams.get(key);
+      if (candidate?.startsWith("http://") || candidate?.startsWith("https://")) {
+        target = candidate;
+        break;
+      }
     }
+
+    if (!target) return current.toString();
+    current = new URL(target);
   }
 
-  return url.toString();
+  return current.toString();
 }
 
 export function makeOrderingSource(input: {
@@ -68,6 +79,8 @@ export function makeOrderingSource(input: {
   discoveredFrom: OrderingSource["discoveredFrom"];
   provider?: OrderingProvider;
   label?: string;
+  discoveryMethod?: OrderingSource["discoveryMethod"];
+  evidenceText?: string;
 }): OrderingSource {
   const url = unwrapGoogleRedirect(input.url);
   const inferred = inferProvider(url);
@@ -80,6 +93,8 @@ export function makeOrderingSource(input: {
     url,
     fulfillment: inferFulfillment(input.text ?? ""),
     discoveredFrom: input.discoveredFrom,
+    ...(input.discoveryMethod ? { discoveryMethod: input.discoveryMethod } : {}),
+    ...(input.evidenceText ? { evidenceText: input.evidenceText } : {}),
   };
 }
 
@@ -96,5 +111,15 @@ export function dedupeSources(sources: OrderingSource[]): OrderingSource[] {
 }
 
 export function isKnownDynamicProvider(provider: OrderingProvider): boolean {
-  return ["doordash", "ubereats", "grubhub", "toast", "chownow", "google_ordering"].includes(provider);
+  return [
+    "doordash",
+    "ubereats",
+    "grubhub",
+    "toast",
+    "chownow",
+    "olo",
+    "square",
+    "clover",
+    "google_ordering",
+  ].includes(provider);
 }

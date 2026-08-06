@@ -13,27 +13,28 @@ npm run dev
 
 Open [http://localhost:3000](http://localhost:3000).
 
-## Restaurant and menu pipeline
+## Restaurant ordering-source discovery
 
-The restaurant flow now has three stages:
+The current restaurant flow deliberately separates provider discovery from menu
+extraction:
 
 1. `POST /api/generate-candidates` uses Google Geocoding and Places Nearby
    Search to return real restaurants. Candidates start with no dollar estimate;
    Google price levels are retained only as metadata and never enter scoring.
-2. `POST /api/restaurants/ordering-sources` starts from a Google Place ID,
-   follows the restaurant website's menu/order links, and—when a browser is
-   configured—opens the Google Maps online-order control to collect additional
-   providers.
-3. `POST /api/restaurants/menu` extracts and normalizes menu items from up to
-   five discovered sources. It tries Schema.org JSON-LD, provider application
-   JSON, and semantic DOM markup. Dynamic pages are rendered with Playwright
-   when a browser is configured.
+2. `POST /api/restaurants/ordering-sources` opens the restaurant's Google Maps
+   listing, targets its **Online ordering** control, and returns only provider
+   URLs exposed by that interaction. The ordinary restaurant website is
+   returned separately as an explicitly uncounted fallback.
+3. The candidate lab lists each provider, domain, final URL, discovery method,
+   unresolved controls, and every warning. It also aggregates provider counts
+   across the current ten restaurants so the next extraction adapters can be
+   chosen from observed data.
 
-After candidate generation, the browser automatically enriches every restaurant
-with two concurrent workers. Until a menu is read, the card shows **Checking
-online menu** and its budget score remains pending. Once prices are available,
-the card displays the menu-item 25th–75th percentile range and recomputes its
-local score. The card action is retained only for refresh/retry.
+After candidate generation, two workers inspect all ten restaurants. Menu-price
+extraction and budget scoring intentionally remain pending during this discovery
+phase; unverified DOM/embedded-JSON prices are not used. The existing
+`POST /api/restaurants/menu` experiment remains in the repository for the later
+provider-adapter phase, but the candidate workflow does not call it.
 
 ## Environment variables
 
@@ -49,9 +50,8 @@ Optional browser configuration (choose one):
 
 During local development, an installed macOS/Windows/Linux Chrome or Chromium is
 detected automatically. In a hosted environment, set `PLAYWRIGHT_WS_ENDPOINT`.
-Without a browser, normal restaurant websites and server-rendered menu pages
-still work; Google Maps button interaction and JavaScript-only provider menus
-return a warning instead of failing the entire restaurant check.
+Without a browser, Google Maps button interaction returns a visible diagnostic;
+the restaurant website is shown only as an uncounted fallback.
 
 ## Quality checks
 

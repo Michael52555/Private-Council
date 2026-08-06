@@ -12,9 +12,8 @@ import type {
   LocalAgentState,
 } from "@/lib/planning-types";
 import type {
-  MenuItem,
+  OrderingDiscoveryDiagnostics,
   OrderingSource,
-  RestaurantMenuResult,
 } from "@/lib/menu/types";
 
 import {
@@ -105,18 +104,34 @@ type GenerateCandidatesApiResponse =
 type OrderingDiscoveryApiResponse =
   | {
       sources: OrderingSource[];
+      websiteFallbackSources: OrderingSource[];
       warnings: string[];
+      diagnostics: OrderingDiscoveryDiagnostics;
     }
   | { error: string };
 
-type CandidateMenuState = {
+type CandidateOrderingState = {
   status: "loading" | "success" | "error";
   sources: OrderingSource[];
-  items: MenuItem[];
+  websiteFallbackSources: OrderingSource[];
   warnings: string[];
-  priceSummary?: RestaurantMenuResult["priceSummary"];
+  diagnostics?: OrderingDiscoveryDiagnostics;
   error?: string;
 };
+
+function sourceHostname(source: OrderingSource): string {
+  try {
+    return new URL(source.url).hostname.replace(/^www\./, "");
+  } catch {
+    return source.label;
+  }
+}
+
+function sourceInventoryLabel(source: OrderingSource): string {
+  return source.provider === "restaurant_website" || source.provider === "unknown"
+    ? sourceHostname(source)
+    : source.label;
+}
 
 type DistanceEvaluation =
   | {
@@ -368,11 +383,11 @@ export default function RoomPage() {
   const [candidateGenerationError, setCandidateGenerationError] =
   useState("");
 
-  const [candidateMenus, setCandidateMenus] = useState<
-    Record<string, CandidateMenuState>
+  const [candidateOrdering, setCandidateOrdering] = useState<
+    Record<string, CandidateOrderingState>
   >({});
 
-  const menuEnrichmentRunRef = useRef(0);
+  const orderingDiscoveryRunRef = useRef(0);
 
   const [privateOriginAddress, setPrivateOriginAddress] =
   useState("");
@@ -525,8 +540,8 @@ export default function RoomPage() {
 
   async function handleGenerateCandidates() {
     const enrichmentRun =
-      menuEnrichmentRunRef.current + 1;
-    menuEnrichmentRunRef.current = enrichmentRun;
+      orderingDiscoveryRunRef.current + 1;
+    orderingDiscoveryRunRef.current = enrichmentRun;
     setIsGeneratingCandidates(true);
     setCandidateGenerationError("");
 
@@ -564,8 +579,8 @@ export default function RoomPage() {
         }
 
         setCandidates(data.candidates);
-        setCandidateMenus({});
-        void enrichCandidateMenus(
+        setCandidateOrdering({});
+        void enrichCandidateOrderingSources(
           data.candidates,
           enrichmentRun,
         );
@@ -581,11 +596,11 @@ export default function RoomPage() {
     }
 }
 
-  async function handleLoadMenu(
+  async function handleDiscoverOrderingSources(
     candidate: RestaurantCandidate,
-    enrichmentRun = menuEnrichmentRunRef.current,
+    enrichmentRun = orderingDiscoveryRunRef.current,
   ) {
-    if (enrichmentRun !== menuEnrichmentRunRef.current) {
+    if (enrichmentRun !== orderingDiscoveryRunRef.current) {
       return;
     }
 
@@ -596,12 +611,12 @@ export default function RoomPage() {
           : entry,
       ),
     );
-    setCandidateMenus((current) => ({
+    setCandidateOrdering((current) => ({
       ...current,
       [candidate.id]: {
         status: "loading",
         sources: [],
-        items: [],
+        websiteFallbackSources: [],
         warnings: [],
       },
     }));
@@ -628,82 +643,49 @@ export default function RoomPage() {
             : "Could not discover ordering sources.",
         );
       }
-      if (discovery.sources.length === 0) {
-        throw new Error("No public menu or ordering website was found for this restaurant.");
-      }
-
-      const menuResponse = await fetch("/api/restaurants/menu", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          placeId: candidate.id,
-          restaurantName: candidate.name,
-          sources: discovery.sources,
-        }),
-      });
-      const menu = (await menuResponse.json()) as RestaurantMenuResult | { error: string };
-      if (!menuResponse.ok || "error" in menu) {
-        throw new Error("error" in menu ? menu.error : "Could not extract this menu.");
-      }
-
-      const extractionWarnings = menu.menus.flatMap((entry) => entry.warnings);
-      if (enrichmentRun !== menuEnrichmentRunRef.current) {
+      if (enrichmentRun !== orderingDiscoveryRunRef.current) {
         return;
       }
 
-      setCandidateMenus((current) => ({
+      setCandidateOrdering((current) => ({
         ...current,
         [candidate.id]: {
           status: "success",
           sources: discovery.sources,
-          items: menu.items,
-          warnings: [...discovery.warnings, ...extractionWarnings],
-          priceSummary: menu.priceSummary,
+          websiteFallbackSources: discovery.websiteFallbackSources,
+          warnings: discovery.warnings,
+          diagnostics: discovery.diagnostics,
         },
       }));
-
-      const lower = menu.priceSummary.lowerQuartile;
-      const upper = menu.priceSummary.upperQuartile;
-      const median = menu.priceSummary.median;
-      const hasMenuPrices =
-        lower !== null &&
-        upper !== null &&
-        median !== null;
 
       setCandidates((current) =>
         current.map((entry) =>
           entry.id === candidate.id
             ? {
                 ...entry,
-                estimatedPriceMin: hasMenuPrices
-                  ? Math.round(lower)
-                  : null,
-                estimatedPriceMax: hasMenuPrices
-                  ? Math.round(upper)
-                  : null,
-                pricePerPerson: hasMenuPrices
-                  ? Math.round(median)
-                  : null,
-                menuStatus: hasMenuPrices
+                estimatedPriceMin: null,
+                estimatedPriceMax: null,
+                pricePerPerson: null,
+                menuStatus: discovery.sources.length > 0
                   ? "loaded"
                   : "unavailable",
-                menuItemCount: menu.items.length,
+                menuItemCount: 0,
                 orderingSources: discovery.sources,
               }
             : entry,
         ),
       );
     } catch (error) {
-      if (enrichmentRun !== menuEnrichmentRunRef.current) {
+      if (enrichmentRun !== orderingDiscoveryRunRef.current) {
         return;
       }
 
-      setCandidateMenus((current) => ({
+      setCandidateOrdering((current) => ({
         ...current,
         [candidate.id]: {
           status: "error",
           sources: [],
-          items: [],
+          websiteFallbackSources: [],
           warnings: [],
           error: error instanceof Error ? error.message : "Could not load this menu.",
         },
@@ -724,7 +706,7 @@ export default function RoomPage() {
     }
   }
 
-  async function enrichCandidateMenus(
+  async function enrichCandidateOrderingSources(
     restaurantCandidates: RestaurantCandidate[],
     enrichmentRun: number,
   ) {
@@ -732,7 +714,7 @@ export default function RoomPage() {
 
     async function worker() {
       while (
-        enrichmentRun === menuEnrichmentRunRef.current
+        enrichmentRun === orderingDiscoveryRunRef.current
       ) {
         const candidate =
           restaurantCandidates[nextCandidateIndex];
@@ -742,7 +724,7 @@ export default function RoomPage() {
           return;
         }
 
-        await handleLoadMenu(
+        await handleDiscoverOrderingSources(
           candidate,
           enrichmentRun,
         );
@@ -1231,11 +1213,32 @@ export default function RoomPage() {
       return b.totalScore - a.totalScore;
     });
 
-  const completedMenuChecks = candidates.filter(
+  const completedOrderingChecks = candidates.filter(
     (candidate) =>
       candidate.menuStatus === "loaded" ||
       candidate.menuStatus === "unavailable",
   ).length;
+
+  const providerRestaurantCounts = new Map<string, number>();
+  for (const state of Object.values(candidateOrdering)) {
+    if (state.status !== "success") continue;
+    const labelsForRestaurant = new Set(
+      state.sources.map(sourceInventoryLabel),
+    );
+    for (const label of labelsForRestaurant) {
+      providerRestaurantCounts.set(
+        label,
+        (providerRestaurantCounts.get(label) ?? 0) + 1,
+      );
+    }
+  }
+  const providerInventory = [...providerRestaurantCounts.entries()]
+    .map(([label, restaurantCount]) => ({ label, restaurantCount }))
+    .sort(
+      (left, right) =>
+        right.restaurantCount - left.restaurantCount ||
+        left.label.localeCompare(right.label),
+    );
 
 
   if (!hasLoaded) {
@@ -1629,7 +1632,7 @@ export default function RoomPage() {
                                 </h2>
 
                                 <p className="mt-2 max-w-xl text-sm leading-6 text-gray-400">
-                                Your local agent evaluates each option using your confirmed preferences.
+                                Inspecting the ordering providers exposed by each Google Maps listing.
                                 </p>
                             </div>
 
@@ -1640,7 +1643,7 @@ export default function RoomPage() {
 
                                 {candidates.length > 0 && (
                                   <span className="rounded-full border border-white/10 bg-white/10 px-3 py-1 text-sm font-semibold text-gray-200">
-                                    {completedMenuChecks}/{candidates.length} menus checked
+                                    {completedOrderingChecks}/{candidates.length} ordering sources checked
                                   </span>
                                 )}
 
@@ -1668,6 +1671,27 @@ export default function RoomPage() {
 
                             
                             </div>
+
+                            {providerInventory.length > 0 && (
+                              <div className="mt-5 rounded-2xl border border-purple-300/15 bg-purple-500/10 p-4">
+                                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-purple-200">
+                                  Provider inventory
+                                </p>
+                                <p className="mt-1 text-xs leading-5 text-gray-400">
+                                  Counts show how many restaurant listings exposed each provider through Google Maps.
+                                </p>
+                                <div className="mt-3 flex flex-wrap gap-2">
+                                  {providerInventory.map((provider) => (
+                                    <span
+                                      key={provider.label}
+                                      className="rounded-full border border-white/10 bg-black/20 px-3 py-1 text-xs text-gray-200"
+                                    >
+                                      {provider.label} · {provider.restaurantCount}
+                                    </span>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
 
                             {!confirmedDistancePreference ? (
                             <div className="mt-6 rounded-2xl border border-dashed border-white/15 bg-white/5 px-6 py-10 text-center">
@@ -1711,14 +1735,13 @@ export default function RoomPage() {
                                         </span>
 
                                         <p className="mt-1 text-sm text-gray-400">
-                                          {typeof candidate.estimatedPriceMin === "number" &&
-                                          typeof candidate.estimatedPriceMax === "number"
-                                            ? `$${candidate.estimatedPriceMin}-$${candidate.estimatedPriceMax} · menu items`
+                                          {candidate.menuStatus === "loaded"
+                                            ? `${candidate.orderingSources.length} Google ordering source${candidate.orderingSources.length === 1 ? "" : "s"}`
                                             : candidate.menuStatus === "unavailable"
-                                              ? "Menu price unavailable"
+                                              ? "No Google ordering source found"
                                               : candidate.menuStatus === "loading"
-                                                ? "Checking online menu..."
-                                                : "Queued for menu check..."}
+                                                ? "Inspecting Google Maps..."
+                                                : "Queued for source discovery..."}
                                         </p>
                                     </div>
 
@@ -1733,7 +1756,7 @@ export default function RoomPage() {
                                     <div className="mt-4 flex flex-wrap gap-2">
                                       <button
                                         type="button"
-                                        onClick={() => handleLoadMenu(candidate)}
+                                        onClick={() => handleDiscoverOrderingSources(candidate)}
                                         disabled={
                                           candidate.menuStatus === "pending" ||
                                           candidate.menuStatus === "loading"
@@ -1741,12 +1764,12 @@ export default function RoomPage() {
                                         className="rounded-xl border border-purple-300/20 bg-purple-500/15 px-3 py-2 text-xs font-semibold text-purple-100 transition hover:bg-purple-500/25 disabled:cursor-wait disabled:opacity-60"
                                       >
                                         {candidate.menuStatus === "pending"
-                                          ? "Menu check queued"
-                                          : candidateMenus[candidate.id]?.status === "loading"
-                                            ? "Checking ordering sites..."
-                                          : candidateMenus[candidate.id]?.status === "success"
-                                            ? "Refresh menu"
-                                            : "Retry menu"}
+                                          ? "Source check queued"
+                                          : candidateOrdering[candidate.id]?.status === "loading"
+                                            ? "Inspecting Google Maps..."
+                                          : candidateOrdering[candidate.id]?.status === "success"
+                                            ? "Refresh sources"
+                                            : "Retry source discovery"}
                                       </button>
 
                                       {candidate.googleMapsUri && (
@@ -1761,47 +1784,101 @@ export default function RoomPage() {
                                       )}
                                     </div>
 
-                                    {candidateMenus[candidate.id]?.status === "error" && (
+                                    {candidateOrdering[candidate.id]?.status === "error" && (
                                       <p className="mt-3 text-xs leading-5 text-red-300">
-                                        {candidateMenus[candidate.id].error}
+                                        {candidateOrdering[candidate.id].error}
                                       </p>
                                     )}
 
-                                    {candidateMenus[candidate.id]?.status === "success" && (
+                                    {candidateOrdering[candidate.id]?.status === "success" && (
                                       <div className="mt-4 rounded-xl border border-white/10 bg-black/20 p-3">
                                         <div className="flex items-center justify-between gap-3 text-xs">
                                           <span className="font-semibold text-emerald-200">
-                                            {candidateMenus[candidate.id].items.length} menu items
+                                            Google Maps ordering sources
                                           </span>
                                           <span className="text-gray-400">
-                                            {candidateMenus[candidate.id].sources.length} source
-                                            {candidateMenus[candidate.id].sources.length === 1 ? "" : "s"}
+                                            {candidateOrdering[candidate.id].sources.length} found
                                           </span>
                                         </div>
 
-                                        {candidateMenus[candidate.id].items.length > 0 ? (
-                                          <ul className="mt-3 space-y-2 text-xs text-gray-300">
-                                            {candidateMenus[candidate.id].items.slice(0, 3).map((item) => (
-                                              <li key={item.id} className="flex justify-between gap-3">
-                                                <span className="truncate">{item.name}</span>
-                                                {typeof item.price === "number" && (
-                                                  <span className="shrink-0 text-gray-400">
-                                                    ${item.price.toFixed(2)}
+                                        {candidateOrdering[candidate.id].sources.length > 0 ? (
+                                          <ul className="mt-3 space-y-3 text-xs text-gray-300">
+                                            {candidateOrdering[candidate.id].sources.map((source) => (
+                                              <li key={source.id} className="rounded-lg border border-white/10 bg-white/5 p-3">
+                                                <div className="flex items-start justify-between gap-2">
+                                                  <span className="font-semibold text-white">
+                                                    {sourceInventoryLabel(source)}
                                                   </span>
-                                                )}
+                                                  <span className="shrink-0 text-[10px] uppercase tracking-wide text-gray-500">
+                                                    {source.fulfillment}
+                                                  </span>
+                                                </div>
+                                                <a
+                                                  href={source.url}
+                                                  target="_blank"
+                                                  rel="noreferrer"
+                                                  className="mt-2 block break-all text-purple-300 underline decoration-purple-300/30 underline-offset-2"
+                                                >
+                                                  {sourceHostname(source)} ↗
+                                                </a>
+                                                <p className="mt-1 break-all text-[10px] leading-4 text-gray-500">
+                                                  {source.url}
+                                                </p>
+                                                <p className="mt-2 text-[10px] text-gray-500">
+                                                  {source.discoveryMethod?.replaceAll("_", " ") ?? "google maps"}
+                                                  {source.evidenceText ? ` · ${source.evidenceText}` : ""}
+                                                </p>
                                               </li>
                                             ))}
                                           </ul>
                                         ) : (
                                           <p className="mt-2 text-xs leading-5 text-amber-200">
-                                            Sources were found, but no menu items could be recognized yet.
+                                            Google Maps exposed no resolvable provider URL for this listing.
                                           </p>
                                         )}
 
-                                        {candidateMenus[candidate.id].warnings.length > 0 && (
-                                          <p className="mt-3 text-[11px] leading-4 text-gray-500">
-                                            {candidateMenus[candidate.id].warnings[0]}
-                                          </p>
+                                        {candidateOrdering[candidate.id].websiteFallbackSources.length > 0 && (
+                                          <div className="mt-3 border-t border-white/10 pt-3 text-[11px] text-gray-500">
+                                            <p className="font-semibold text-gray-400">
+                                              Website fallback — not counted
+                                            </p>
+                                            {candidateOrdering[candidate.id].websiteFallbackSources.map((source) => (
+                                              <a
+                                                key={source.id}
+                                                href={source.url}
+                                                target="_blank"
+                                                rel="noreferrer"
+                                                className="mt-1 block break-all text-gray-500 underline decoration-white/10 underline-offset-2"
+                                              >
+                                                {sourceHostname(source)} ↗
+                                              </a>
+                                            ))}
+                                          </div>
+                                        )}
+
+                                        {candidateOrdering[candidate.id].diagnostics && (
+                                          <div className="mt-3 border-t border-white/10 pt-3 text-[10px] leading-4 text-gray-500">
+                                            <p>
+                                              Online ordering control: {candidateOrdering[candidate.id].diagnostics?.orderControlFound ? "found" : "not found"}
+                                            </p>
+                                            <p>
+                                              Result scope: {candidateOrdering[candidate.id].diagnostics?.resultScope}
+                                              {` · ${candidateOrdering[candidate.id].diagnostics?.inspectedLinkCount ?? 0} links inspected`}
+                                            </p>
+                                            {(candidateOrdering[candidate.id].diagnostics?.unresolvedControlLabels.length ?? 0) > 0 && (
+                                              <p className="mt-1 break-words">
+                                                Unresolved controls: {candidateOrdering[candidate.id].diagnostics?.unresolvedControlLabels.join(", ")}
+                                              </p>
+                                            )}
+                                          </div>
+                                        )}
+
+                                        {candidateOrdering[candidate.id].warnings.length > 0 && (
+                                          <ul className="mt-3 space-y-1 border-t border-white/10 pt-3 text-[11px] leading-4 text-amber-200/80">
+                                            {candidateOrdering[candidate.id].warnings.map((warning, warningIndex) => (
+                                              <li key={`${warningIndex}-${warning}`}>• {warning}</li>
+                                            ))}
+                                          </ul>
                                         )}
                                       </div>
                                     )}

@@ -79,4 +79,5 @@ test("discovers both known providers and custom order links", () => {
 test("identifies common ordering providers by subdomain", () => {
   assert.equal(inferProvider("https://order.toasttab.com/online/example").provider, "toast");
   assert.equal(inferProvider("https://www.ubereats.com/store/example").provider, "ubereats");
+  assert.equal(inferProvider("https://ordering.olo.com/menu/example").provider, "olo");
 });

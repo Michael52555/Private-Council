@@ -5,6 +5,9 @@ export type OrderingProvider =
   | "grubhub"
   | "toast"
   | "chownow"
+  | "olo"
+  | "square"
+  | "clover"
   | "google_ordering"
   | "unknown";
 
@@ -17,6 +20,21 @@ export type OrderingSource = {
   url: string;
   fulfillment: FulfillmentMethod;
   discoveredFrom: "google_maps" | "restaurant_website" | "place_details";
+  discoveryMethod?:
+    | "google_maps_dialog"
+    | "google_maps_new_link"
+    | "google_maps_navigation"
+    | "website_fallback";
+  evidenceText?: string;
+};
+
+export type OrderingDiscoveryDiagnostics = {
+  browserConfigured: boolean;
+  orderControlFound: boolean;
+  orderControlLabel?: string;
+  resultScope: "dialog" | "new_links" | "navigation" | "none";
+  inspectedLinkCount: number;
+  unresolvedControlLabels: string[];
 };
 
 export type MenuItem = {
