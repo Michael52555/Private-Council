@@ -1,212 +1,192 @@
-
 import type {
-  Importance,
-  Visibility,
-  PlanningMode,
-  PreferenceCategory,
-  PreferenceInterpretation,
   Preference,
   RestaurantCandidate,
-  CandidatePlan,
-  RoomConfig,
-  LocalAgentState,
 } from "@/lib/planning-types";
 
-
-
 export type PreferenceScore = {
-  category: string;
-  score: number; // 0 - 1
+  category: "distance" | "budget";
+  score: number;
   weight: number;
 };
 
+export type ScoreBreakdownItem = {
+  category: "distance" | "budget";
+  score: number | null;
+  status: "ready" | "pending";
+};
+
 export type RestaurantScore = {
-  candidateId: string;
-  totalScore: number;
-  breakdown: PreferenceScore[];
+  totalScore: number | null;
+  breakdown: ScoreBreakdownItem[];
 };
 
 export function evaluateDistanceScore(
   candidate: RestaurantCandidate,
-  maxDistance:number
-){
-  if(candidate.distanceMiles<= maxDistance){
+  maxDistance: number,
+): number {
+  if (candidate.distanceMiles <= maxDistance) {
     return 1;
   }
 
-  const excess =
-    candidate.distanceMiles - maxDistance;
-
-  return Math.exp(-0.5 * excess);
+  return Math.exp(
+    -0.5 * (candidate.distanceMiles - maxDistance),
+  );
 }
 
 export function evaluateBudgetScore(
   candidate: RestaurantCandidate,
   minBudget: number,
   maxBudget: number,
-): number {
+): number | null {
+  const restaurantMin = candidate.estimatedPriceMin;
+  const restaurantMax = candidate.estimatedPriceMax;
 
-  const restaurantMin =
-    candidate.estimatedPriceMin;
-
-  const restaurantMax =
-    candidate.estimatedPriceMax;
-
-
-  const overlapMin =
-    Math.max(minBudget, restaurantMin);
-
-  const overlapMax =
-    Math.min(maxBudget, restaurantMax);
-
-
-  const overlap =
-    Math.max(0, overlapMax - overlapMin);
-
-
-  const restaurantRange =
-    restaurantMax - restaurantMin;
-
-
-  if (restaurantRange <= 0) {
-    return overlap > 0 ? 1 : 0;
+  if (
+    typeof restaurantMin !== "number" ||
+    typeof restaurantMax !== "number"
+  ) {
+    return null;
   }
 
+  if (restaurantMax <= restaurantMin) {
+    return restaurantMin >= minBudget &&
+      restaurantMin <= maxBudget
+      ? 1
+      : 0;
+  }
 
-  return overlap / restaurantRange;
+  const overlap = Math.max(
+    0,
+    Math.min(maxBudget, restaurantMax) -
+      Math.max(minBudget, restaurantMin),
+  );
+
+  return overlap / (restaurantMax - restaurantMin);
 }
 
-export type ScoreBreakdown = {
-  category: string;
-  score: number;
-}[];
+function isConfirmed(preference: Preference | undefined): boolean {
+  return Boolean(
+    preference?.interpretation?.status === "success" &&
+      preference.interpretation.confirmed,
+  );
+}
 
 export function evaluateRestaurantScore(
   candidate: RestaurantCandidate,
   preferences: Preference[],
-) {
-
+): RestaurantScore {
   const distancePreference = preferences.find(
-  (p) => p.category === "distance"
+    (preference) => preference.category === "distance",
+  );
+  const budgetPreference = preferences.find(
+    (preference) => preference.category === "budget",
   );
 
-  const budgetPreference = preferences.find(
-  (p) => p.category === "budget"
-  );  
-
+  const maxDistance =
+    distancePreference?.interpretation?.structuredData
+      .maxDistanceMiles;
   const distanceScore =
-  distancePreference?.interpretation?.status === "success"
-  && typeof distancePreference.interpretation.structuredData.maxDistanceMiles === "number"
+    isConfirmed(distancePreference) &&
+    typeof maxDistance === "number"
+      ? evaluateDistanceScore(candidate, maxDistance)
+      : null;
 
-  ? evaluateDistanceScore(
-      candidate,
-      distancePreference.interpretation.structuredData.maxDistanceMiles
-    )
-
-  : 1;
-
-
+  const minBudget =
+    budgetPreference?.interpretation?.structuredData
+      .minPriceDollarsPerPerson;
+  const maxBudget =
+    budgetPreference?.interpretation?.structuredData
+      .maxPriceDollarsPerPerson;
   const budgetScore =
-  budgetPreference?.interpretation?.status === "success"
-  && typeof budgetPreference.interpretation.structuredData.minPriceDollarsPerPerson === "number"
-  && typeof budgetPreference.interpretation.structuredData.maxPriceDollarsPerPerson === "number"
+    isConfirmed(budgetPreference) &&
+    typeof minBudget === "number" &&
+    typeof maxBudget === "number"
+      ? evaluateBudgetScore(
+          candidate,
+          minBudget,
+          maxBudget,
+        )
+      : budgetPreference
+        ? null
+        : undefined;
 
-  ? evaluateBudgetScore(
-      candidate,
-      budgetPreference.interpretation.structuredData.minPriceDollarsPerPerson,
-      budgetPreference.interpretation.structuredData.maxPriceDollarsPerPerson,
-    )
+  const breakdown: ScoreBreakdownItem[] = [];
+  const scores: PreferenceScore[] = [];
 
-  : 1;
-
-  const scores = [];
-
-if (distancePreference) {
-  scores.push({
-    category: "distance",
-    score: distanceScore,
-    weight: importanceWeight(
-      distancePreference.importance
-    ),
-  });
-}
-
-
-if (budgetPreference) {
-  scores.push({
-    category: "budget",
-    score: budgetScore,
-    weight: importanceWeight(
-      budgetPreference.importance
-    ),
-  });
-}
-
-if (distancePreference) {
-  scores.push({
-    category: "distance",
-    score: distanceScore,
-    weight: importanceWeight(
-      distancePreference.importance
-    ),
-  });
-}
-
-
-if (budgetPreference) {
-  scores.push({
-    category: "budget",
-    score: budgetScore,
-    weight: importanceWeight(
-      budgetPreference.importance
-    ),
-  });
-}
-
-  const totalScore=combineScores(scores);
-
-  return {
-  totalScore,
-  breakdown: [
-    {
+  if (distancePreference) {
+    breakdown.push({
       category: "distance",
       score: distanceScore,
-    },
-    {
+      status:
+        distanceScore === null ? "pending" : "ready",
+    });
+
+    if (distanceScore !== null) {
+      scores.push({
+        category: "distance",
+        score: distanceScore,
+        weight: importanceWeight(
+          distancePreference.importance,
+        ),
+      });
+    }
+  }
+
+  if (budgetPreference) {
+    breakdown.push({
       category: "budget",
-      score: budgetScore,
-    },
-  ],
-};
+      score: budgetScore ?? null,
+      status:
+        typeof budgetScore === "number"
+          ? "ready"
+          : "pending",
+    });
+
+    if (typeof budgetScore === "number") {
+      scores.push({
+        category: "budget",
+        score: budgetScore,
+        weight: importanceWeight(
+          budgetPreference.importance,
+        ),
+      });
+    }
+  }
+
+  const hasPendingRequiredScore =
+    breakdown.some((item) => item.status === "pending");
+
+  return {
+    totalScore: hasPendingRequiredScore
+      ? null
+      : combineScores(scores),
+    breakdown,
+  };
 }
 
 export function importanceWeight(
- importance:number
-){
- return importance/5;
+  importance: number,
+): number {
+  return importance / 5;
 }
 
 export function combineScores(
- scores: PreferenceScore[]
-){
- const totalWeight =
-   scores.reduce(
-    (sum,s)=>sum+s.weight,
-    0
-   );
+  scores: PreferenceScore[],
+): number {
+  const totalWeight = scores.reduce(
+    (sum, score) => sum + score.weight,
+    0,
+  );
 
- if(totalWeight===0){
-   return 0;
- }
+  if (totalWeight === 0) {
+    return 0;
+  }
 
- return scores.reduce(
-   (sum,s)=>
-    sum+s.score*s.weight,
-   0
- ) / totalWeight;
+  return (
+    scores.reduce(
+      (sum, score) =>
+        sum + score.score * score.weight,
+      0,
+    ) / totalWeight
+  );
 }
-
-
-
-
-
