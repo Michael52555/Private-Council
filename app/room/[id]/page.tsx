@@ -1865,6 +1865,19 @@ export default function RoomPage() {
                                               Result scope: {candidateOrdering[candidate.id].diagnostics?.resultScope}
                                               {` · ${candidateOrdering[candidate.id].diagnostics?.inspectedLinkCount ?? 0} links inspected`}
                                             </p>
+                                            {candidateOrdering[candidate.id].diagnostics?.pageTitle && (
+                                              <p className="mt-1 break-words">
+                                                Page: {candidateOrdering[candidate.id].diagnostics?.pageTitle}
+                                              </p>
+                                            )}
+                                            <p>
+                                              Consent handled: {candidateOrdering[candidate.id].diagnostics?.consentHandled ? "yes" : "no"}
+                                            </p>
+                                            {(candidateOrdering[candidate.id].diagnostics?.visibleControlLabels.length ?? 0) > 0 && (
+                                              <p className="mt-1 break-words">
+                                                Visible controls: {candidateOrdering[candidate.id].diagnostics?.visibleControlLabels.slice(0, 12).join(" · ")}
+                                              </p>
+                                            )}
                                             {(candidateOrdering[candidate.id].diagnostics?.unresolvedControlLabels.length ?? 0) > 0 && (
                                               <p className="mt-1 break-words">
                                                 Unresolved controls: {candidateOrdering[candidate.id].diagnostics?.unresolvedControlLabels.join(", ")}

@@ -32,8 +32,12 @@ export type OrderingDiscoveryDiagnostics = {
   browserConfigured: boolean;
   orderControlFound: boolean;
   orderControlLabel?: string;
+  finalGoogleMapsUrl?: string;
+  pageTitle?: string;
+  consentHandled: boolean;
   resultScope: "dialog" | "new_links" | "navigation" | "none";
   inspectedLinkCount: number;
+  visibleControlLabels: string[];
   unresolvedControlLabels: string[];
 };
 

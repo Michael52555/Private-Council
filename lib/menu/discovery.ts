@@ -70,8 +70,10 @@ export async function discoverOrderingSources(input: {
   let diagnostics: OrderingDiscoveryDiagnostics = {
     browserConfigured: false,
     orderControlFound: false,
+    consentHandled: false,
     resultScope: "none",
     inspectedLinkCount: 0,
+    visibleControlLabels: [],
     unresolvedControlLabels: [],
   };
 

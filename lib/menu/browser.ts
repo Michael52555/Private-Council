@@ -79,7 +79,10 @@ async function openBrowser(): Promise<{ browser: Browser; remote: boolean }> {
 
 async function withPage<T>(task: (page: Page, context: BrowserContext) => Promise<T>): Promise<T> {
   const { browser } = await openBrowser();
-  const context = await browser.newContext({ locale: "en-US" });
+  const context = await browser.newContext({
+    locale: "en-US",
+    viewport: { width: 1440, height: 1200 },
+  });
   const page = await context.newPage();
   page.setDefaultTimeout(8_000);
 
@@ -133,8 +136,87 @@ const orderingEvidenceText =
   /order|pickup|pick-up|delivery|takeout|door\s*dash|uber\s*eats|grubhub|toast|chownow|olo|square|clover|订餐|外带|外送|自取/i;
 const nonProviderText = /privacy|terms|help|learn more|sign in|log in/i;
 
+function controlLabel(element: Element): string {
+  return `${element.getAttribute("aria-label") ?? ""} ${element.textContent ?? ""}`
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function orderControlScore(label: string): number {
+  if (!label || /order history|your orders|reorder|pre-?order|directions/i.test(label)) {
+    return -1;
+  }
+  if (exactOrderControlText.test(label)) return 100;
+  if (broadOrderControlText.test(label)) return 90;
+  if (/\border(?:ing)?\b|订餐|下单/i.test(label)) return 60;
+  return -1;
+}
+
+async function findOrderControl(page: Page): Promise<{
+  locator?: Locator;
+  label?: string;
+}> {
+  let best: { locator: Locator; label: string; score: number } | undefined;
+
+  for (const frame of page.frames()) {
+    const controls = frame.locator(
+      'button:visible, a:visible, [role="button"]:visible, [role="link"]:visible',
+    );
+    const count = Math.min(await controls.count().catch(() => 0), 300);
+    for (let index = 0; index < count; index += 1) {
+      const locator = controls.nth(index);
+      const label = await locator.evaluate(controlLabel).catch(() => "");
+      const score = orderControlScore(label);
+      if (score > (best?.score ?? -1)) best = { locator, label, score };
+    }
+  }
+
+  return best ? { locator: best.locator, label: best.label } : {};
+}
+
+async function collectVisibleControlLabels(page: Page): Promise<string[]> {
+  const labels: string[] = [];
+  for (const frame of page.frames()) {
+    const frameLabels = await frame
+      .locator('button:visible, a:visible, [role="button"]:visible, [role="link"]:visible')
+      .evaluateAll((controls) =>
+        controls
+          .map((control) =>
+            `${control.getAttribute("aria-label") ?? ""} ${control.textContent ?? ""}`
+              .replace(/\s+/g, " ")
+              .trim(),
+          )
+          .filter((label) => label.length >= 2 && label.length <= 120),
+      )
+      .catch(() => [] as string[]);
+    labels.push(...frameLabels);
+  }
+  return [...new Set(labels)].slice(0, 40);
+}
+
+async function dismissGoogleConsent(page: Page): Promise<boolean> {
+  const pageText = await page.locator("body").innerText({ timeout: 2_000 }).catch(() => "");
+  const isConsentPage =
+    /consent\.google\./i.test(page.url()) ||
+    /before you continue to google|在继续使用 google|同意 google/i.test(pageText);
+  if (!isConsentPage) return false;
+
+  const consentText = /accept all|i agree|agree|accept|接受全部|同意/i;
+  for (const frame of page.frames()) {
+    const control = frame
+      .getByRole("button", { name: consentText })
+      .or(frame.getByRole("link", { name: consentText }))
+      .first();
+    if (!(await control.isVisible().catch(() => false))) continue;
+    await control.click({ timeout: 5_000 });
+    await page.waitForLoadState("domcontentloaded", { timeout: 8_000 }).catch(() => undefined);
+    return true;
+  }
+  return false;
+}
+
 async function collectLinks(locator: Locator): Promise<LinkCandidate[]> {
-  return locator.locator("a[href]").evaluateAll((anchors) =>
+  return locator.locator("a[href]:visible").evaluateAll((anchors) =>
     anchors.map((anchor) => ({
       href: (anchor as HTMLAnchorElement).href,
       text: `${anchor.textContent ?? ""} ${anchor.getAttribute("aria-label") ?? ""}`
@@ -149,7 +231,7 @@ async function collectPageLinks(page: Page): Promise<LinkCandidate[]> {
   for (const frame of page.frames()) {
     links.push(
       ...(await frame
-        .locator("a[href]")
+        .locator("a[href]:visible")
         .evaluateAll((anchors) =>
           anchors.map((anchor) => ({
             href: (anchor as HTMLAnchorElement).href,
@@ -260,6 +342,16 @@ export async function discoverGoogleOrderingLinks(
 
     await page.goto(safeUrl.toString(), { waitUntil: "domcontentloaded", timeout: 25_000 });
     await page.waitForLoadState("networkidle", { timeout: 6_000 }).catch(() => undefined);
+    const consentHandled = await dismissGoogleConsent(page);
+    if (consentHandled) {
+      await page.waitForLoadState("networkidle", { timeout: 6_000 }).catch(() => undefined);
+    }
+    await page.locator("h1").first().waitFor({ state: "visible", timeout: 8_000 }).catch(() => undefined);
+    await page.waitForTimeout(1_000);
+
+    const finalGoogleMapsUrl = page.url();
+    const pageTitle = await page.title().catch(() => "");
+    const visibleControlLabels = await collectVisibleControlLabels(page);
     const baselineLinks = await collectPageLinks(page);
     const baselineHrefs = new Set(
       baselineLinks
@@ -267,29 +359,12 @@ export async function discoverGoogleOrderingLinks(
         .filter((href): href is string => Boolean(href)),
     );
 
-    const exactOrderControl = page
-      .getByRole("button", { name: exactOrderControlText })
-      .or(page.getByRole("link", { name: exactOrderControlText }))
-      .first();
-    const fallbackOrderControl = page
-      .getByRole("button", { name: broadOrderControlText })
-      .or(page.getByRole("link", { name: broadOrderControlText }))
-      .or(page.locator("button, a").filter({ hasText: broadOrderControlText }))
-      .first();
-    const exactVisible = await exactOrderControl.isVisible().catch(() => false);
-    const orderControl = exactVisible ? exactOrderControl : fallbackOrderControl;
-    const orderControlFound = await orderControl.isVisible().catch(() => false);
-    const orderControlLabel = orderControlFound
-      ? await orderControl
-          .evaluate((element) =>
-            `${element.getAttribute("aria-label") ?? ""} ${element.textContent ?? ""}`
-              .replace(/\s+/g, " ")
-              .trim(),
-          )
-          .catch(() => undefined)
-      : undefined;
+    const orderControlMatch = await findOrderControl(page);
+    const orderControl = orderControlMatch.locator;
+    const orderControlLabel = orderControlMatch.label;
+    const orderControlFound = Boolean(orderControl);
 
-    if (!orderControlFound) {
+    if (!orderControlFound || !orderControl) {
       warnings.push("Google Maps did not expose a visible Online ordering control for this place.");
       return {
         sources: [],
@@ -297,8 +372,12 @@ export async function discoverGoogleOrderingLinks(
         diagnostics: {
           browserConfigured: true,
           orderControlFound: false,
+          finalGoogleMapsUrl,
+          ...(pageTitle ? { pageTitle } : {}),
+          consentHandled,
           resultScope: "none",
           inspectedLinkCount: 0,
+          visibleControlLabels,
           unresolvedControlLabels: [],
         },
       };
@@ -380,8 +459,12 @@ export async function discoverGoogleOrderingLinks(
         browserConfigured: true,
         orderControlFound: true,
         ...(orderControlLabel ? { orderControlLabel } : {}),
+        finalGoogleMapsUrl,
+        ...(pageTitle ? { pageTitle } : {}),
+        consentHandled,
         resultScope,
         inspectedLinkCount: inspectedLinks.length,
+        visibleControlLabels,
         unresolvedControlLabels,
       },
     };
