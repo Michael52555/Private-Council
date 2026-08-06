@@ -94,27 +94,6 @@ function calculateDistanceMiles(
   return Math.round(3958.8 * angularDistance * 10) / 10;
 }
 
-function estimatePriceRange(priceLevel?: string): {
-  minimum: number;
-  maximum: number;
-} {
-  switch (priceLevel) {
-    case "PRICE_LEVEL_FREE":
-      return { minimum: 0, maximum: 5 };
-    case "PRICE_LEVEL_INEXPENSIVE":
-      return { minimum: 8, maximum: 25 };
-    case "PRICE_LEVEL_MODERATE":
-      return { minimum: 20, maximum: 50 };
-    case "PRICE_LEVEL_EXPENSIVE":
-      return { minimum: 45, maximum: 100 };
-    case "PRICE_LEVEL_VERY_EXPENSIVE":
-      return { minimum: 90, maximum: 250 };
-    default:
-      // Deliberately broad until an extracted menu replaces this estimate.
-      return { minimum: 10, maximum: 80 };
-  }
-}
-
 async function searchNearbyRestaurants(
   origin: GeocodedOrigin,
   radiusMeters: number,
@@ -170,7 +149,6 @@ async function searchNearbyRestaurants(
       continue;
     }
 
-    const price = estimatePriceRange(place.priceLevel);
     candidates.push({
       id,
       name,
@@ -181,9 +159,11 @@ async function searchNearbyRestaurants(
         latitude,
         longitude,
       ),
-      pricePerPerson: Math.round((price.minimum + price.maximum) / 2),
-      estimatedPriceMin: price.minimum,
-      estimatedPriceMax: price.maximum,
+      pricePerPerson: null,
+      estimatedPriceMin: null,
+      estimatedPriceMax: null,
+      menuStatus: "pending",
+      menuItemCount: 0,
       priceLevel: place.priceLevel,
       rating: place.rating,
       userRatingCount: place.userRatingCount,
@@ -243,7 +223,7 @@ export async function POST(request: Request) {
       meta: {
         originResolved: true,
         formattedOrigin: geocodedOrigin.formattedAddress,
-        priceEstimatesNeedMenu: true,
+        menuEnrichmentRequired: true,
       },
     });
   } catch (error) {
