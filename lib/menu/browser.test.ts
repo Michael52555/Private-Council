@@ -51,3 +51,21 @@ test("unwraps Google redirect links before provider selection", () => {
 
   assert.equal(links[0]?.href, target);
 });
+
+test("rejects Google short links and anti-bot infrastructure as ordering providers", () => {
+  const links = selectGoogleOrderingLinkCandidates(
+    [
+      { href: "https://goo.gle/maps-help", text: "Google Maps help" },
+      {
+        href: "https://geo.captcha-delivery.com/captcha/?initialCid=example",
+        text: "Document navigation",
+      },
+      { href: "https://www.pandaexpress.com/location/123", text: "Panda Express" },
+    ],
+    { withinDialog: true },
+  );
+
+  assert.deepEqual(links, [
+    { href: "https://www.pandaexpress.com/location/123", text: "Panda Express" },
+  ]);
+});

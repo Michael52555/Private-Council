@@ -117,6 +117,29 @@ function isGoogleMapsHost(hostname: string): boolean {
   );
 }
 
+function isOrderingInfrastructureHost(hostname: string): boolean {
+  const host = hostname.toLowerCase().replace(/^www\./, "");
+  return (
+    isGoogleMapsHost(host) ||
+    host === "goo.gl" ||
+    host === "goo.gle" ||
+    host.endsWith(".goo.gl") ||
+    host.endsWith(".goo.gle") ||
+    host === "googleapis.com" ||
+    host.endsWith(".googleapis.com") ||
+    host === "googleadservices.com" ||
+    host.endsWith(".googleadservices.com") ||
+    host === "googlesyndication.com" ||
+    host.endsWith(".googlesyndication.com") ||
+    host === "doubleclick.net" ||
+    host.endsWith(".doubleclick.net") ||
+    host === "recaptcha.net" ||
+    host.endsWith(".recaptcha.net") ||
+    host === "captcha-delivery.com" ||
+    host.endsWith(".captcha-delivery.com")
+  );
+}
+
 type LinkCandidate = {
   href: string;
   text: string;
@@ -208,7 +231,14 @@ function providerControlScore(label: string): number {
   ) {
     return -1;
   }
-  if (/(?:[a-z0-9-]+\.)+[a-z]{2,}(?:\b|\/)/i.test(label)) return 100;
+  const domains = label.match(/(?:[a-z0-9-]+\.)+[a-z]{2,}/gi) ?? [];
+  if (
+    domains.length > 0 &&
+    domains.every((domain) => isOrderingInfrastructureHost(domain))
+  ) {
+    return -1;
+  }
+  if (domains.length > 0) return 100;
   if (/door\s*dash|uber\s*eats|grubhub|toast|chownow|olo|square|clover/i.test(label)) {
     return 90;
   }
@@ -334,6 +364,7 @@ export function selectGoogleOrderingLinkCandidates(
     }
 
     if (url.protocol !== "https:") return [];
+    if (isOrderingInfrastructureHost(url.hostname)) return [];
     const provider = inferProvider(href);
     const isGoogleOrdering = provider.provider === "google_ordering";
     const isExternal = !isGoogleMapsHost(url.hostname);
@@ -381,6 +412,7 @@ export async function discoverGoogleOrderingLinks(
       try {
         const url = new URL(rawUrl);
         if (url.protocol !== "https:") return;
+        if (isOrderingInfrastructureHost(url.hostname)) return;
         const provider = inferProvider(url.toString());
         if (!isGoogleMapsHost(url.hostname) || provider.provider === "google_ordering") {
           navigationCandidates.push({ href: url.toString(), text });
