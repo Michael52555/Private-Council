@@ -122,6 +122,12 @@ type LinkCandidate = {
   text: string;
 };
 
+type ClickableCandidate = {
+  locator: Locator;
+  label: string;
+  score: number;
+};
+
 export type GoogleOrderingDiscoveryResult = {
   sources: OrderingSource[];
   warnings: string[];
@@ -192,6 +198,59 @@ async function collectVisibleControlLabels(page: Page): Promise<string[]> {
     labels.push(...frameLabels);
   }
   return [...new Set(labels)].slice(0, 40);
+}
+
+function providerControlScore(label: string): number {
+  if (
+    !label ||
+    label.length > 240 ||
+    /privacy|terms|help|sign in|log in|directions|save|share|reviews?|photos?/i.test(label)
+  ) {
+    return -1;
+  }
+  if (/(?:[a-z0-9-]+\.)+[a-z]{2,}(?:\b|\/)/i.test(label)) return 100;
+  if (/door\s*dash|uber\s*eats|grubhub|toast|chownow|olo|square|clover/i.test(label)) {
+    return 90;
+  }
+  if (/ordering platform|merchant website|order provider|订餐平台|商家网站/i.test(label)) {
+    return 70;
+  }
+  return -1;
+}
+
+async function findProviderControls(
+  page: Page,
+  baselineLabels: Set<string>,
+): Promise<ClickableCandidate[]> {
+  const candidates: ClickableCandidate[] = [];
+  for (const frame of page.frames()) {
+    const controls = frame.locator(
+      'a:visible, button:visible, [role="button"]:visible, [role="link"]:visible, [tabindex="0"]:visible',
+    );
+    const count = Math.min(await controls.count().catch(() => 0), 500);
+    for (let index = 0; index < count; index += 1) {
+      const locator = controls.nth(index);
+      const label = await locator.evaluate(controlLabel).catch(() => "");
+      if (baselineLabels.has(label)) continue;
+      const score = providerControlScore(label);
+      if (score >= 0) candidates.push({ locator, label, score });
+    }
+  }
+
+  const seen = new Set<string>();
+  return candidates
+    .sort(
+      (left, right) =>
+        right.score - left.score ||
+        left.label.length - right.label.length,
+    )
+    .filter((candidate) => {
+      const key = candidate.label.toLowerCase();
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .slice(0, 8);
 }
 
 async function dismissGoogleConsent(page: Page): Promise<boolean> {
@@ -315,29 +374,51 @@ export async function discoverGoogleOrderingLinks(
     const warnings: string[] = [];
     const navigationCandidates: LinkCandidate[] = [];
     const pages = new Set<Page>();
+    let orderControlActivated = false;
+
+    const recordExternalNavigation = (rawUrl: string, text: string) => {
+      if (!orderControlActivated) return;
+      try {
+        const url = new URL(rawUrl);
+        if (url.protocol !== "https:") return;
+        const provider = inferProvider(url.toString());
+        if (!isGoogleMapsHost(url.hostname) || provider.provider === "google_ordering") {
+          navigationCandidates.push({ href: url.toString(), text });
+        }
+      } catch {
+        // Ignore transient browser URLs.
+      }
+    };
 
     const recordNavigation = (candidatePage: Page) => {
       if (pages.has(candidatePage)) return;
       pages.add(candidatePage);
       candidatePage.on("framenavigated", (frame) => {
         if (frame !== candidatePage.mainFrame()) return;
-        try {
-          const url = new URL(frame.url());
-          if (url.protocol !== "https:") return;
-          const provider = inferProvider(url.toString());
-          if (!isGoogleMapsHost(url.hostname) || provider.provider === "google_ordering") {
-            navigationCandidates.push({
-              href: url.toString(),
-              text: "Opened from the Google Maps ordering control",
-            });
-          }
-        } catch {
-          // The page may briefly navigate through non-URL states.
-        }
+        recordExternalNavigation(
+          frame.url(),
+          "Opened from the Google Maps ordering control",
+        );
       });
+      void candidatePage
+        .waitForLoadState("domcontentloaded", { timeout: 8_000 })
+        .catch(() => undefined)
+        .then(() =>
+          recordExternalNavigation(
+            candidatePage.url(),
+            "Opened in a new page from the Google Maps ordering control",
+          ),
+        );
     };
 
     context.on("page", recordNavigation);
+    context.on("request", (request) => {
+      if (!request.isNavigationRequest() || request.resourceType() !== "document") return;
+      recordExternalNavigation(
+        request.url(),
+        "Document navigation from the Google Maps ordering control",
+      );
+    });
     recordNavigation(page);
 
     await page.goto(safeUrl.toString(), { waitUntil: "domcontentloaded", timeout: 25_000 });
@@ -385,6 +466,7 @@ export async function discoverGoogleOrderingLinks(
 
     const visibleDialog = page.locator('[role="dialog"]:visible, [aria-modal="true"]:visible').last();
     const dialogPromise = visibleDialog.waitFor({ state: "visible", timeout: 6_000 });
+    orderControlActivated = true;
     await orderControl.click({ timeout: 8_000 });
     await Promise.race([
       dialogPromise.catch(() => undefined),
@@ -409,11 +491,23 @@ export async function discoverGoogleOrderingLinks(
       );
     }
 
+    const providerControls =
+      selectedLinks.length === 0 && navigationCandidates.length === 0
+        ? await findProviderControls(page, new Set(visibleControlLabels))
+        : [];
+
+    for (const candidate of providerControls) {
+      const navigationCountBeforeClick = navigationCandidates.length;
+      await candidate.locator.click({ timeout: 5_000 }).catch(() => undefined);
+      await page.waitForTimeout(2_500);
+      if (navigationCandidates.length > navigationCountBeforeClick) break;
+    }
+
     for (const candidate of navigationCandidates) {
       sources.push(sourceFromCandidate(candidate, "google_maps_navigation"));
     }
 
-    const unresolvedControlLabels = dialogVisible
+    const dialogControlLabels = dialogVisible
       ? await visibleDialog
           .locator('button, [role="button"]')
           .evaluateAll((controls) =>
@@ -433,6 +527,12 @@ export async function discoverGoogleOrderingLinks(
           )
           .catch(() => [] as string[])
       : [];
+    const unresolvedControlLabels = [
+      ...new Set([
+        ...providerControls.map((candidate) => candidate.label),
+        ...dialogControlLabels,
+      ]),
+    ].slice(0, 20);
 
     const dedupedSources = dedupeSources(sources);
     if (dedupedSources.length === 0) {
