@@ -11,6 +11,11 @@ import type {
   RoomConfig,
   LocalAgentState,
 } from "@/lib/planning-types";
+import type {
+  MenuItem,
+  OrderingSource,
+  RestaurantMenuResult,
+} from "@/lib/menu/types";
 
 import {
   evaluateBudgetScore,
@@ -100,6 +105,22 @@ type GenerateCandidatesApiResponse =
   | {
       error: string;
     };
+
+type OrderingDiscoveryApiResponse =
+  | {
+      sources: OrderingSource[];
+      warnings: string[];
+    }
+  | { error: string };
+
+type CandidateMenuState = {
+  status: "loading" | "success" | "error";
+  sources: OrderingSource[];
+  items: MenuItem[];
+  warnings: string[];
+  priceSummary?: RestaurantMenuResult["priceSummary"];
+  error?: string;
+};
 
 type DistanceEvaluation =
   | {
@@ -351,6 +372,10 @@ export default function RoomPage() {
   const [candidateGenerationError, setCandidateGenerationError] =
   useState("");
 
+  const [candidateMenus, setCandidateMenus] = useState<
+    Record<string, CandidateMenuState>
+  >({});
+
   const [privateOriginAddress, setPrivateOriginAddress] =
   useState("");
 
@@ -538,6 +563,7 @@ export default function RoomPage() {
         }
 
         setCandidates(data.candidates);
+        setCandidateMenus({});
     } catch (error) {
         const message =
         error instanceof Error
@@ -549,6 +575,100 @@ export default function RoomPage() {
         setIsGeneratingCandidates(false);
     }
 }
+
+  async function handleLoadMenu(candidate: RestaurantCandidate) {
+    setCandidateMenus((current) => ({
+      ...current,
+      [candidate.id]: {
+        status: "loading",
+        sources: [],
+        items: [],
+        warnings: [],
+      },
+    }));
+
+    try {
+      const discoveryResponse = await fetch(
+        "/api/restaurants/ordering-sources",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            placeId: candidate.id,
+            websiteUri: candidate.websiteUri,
+            googleMapsUri: candidate.googleMapsUri,
+          }),
+        },
+      );
+      const discovery =
+        (await discoveryResponse.json()) as OrderingDiscoveryApiResponse;
+      if (!discoveryResponse.ok || "error" in discovery) {
+        throw new Error(
+          "error" in discovery
+            ? discovery.error
+            : "Could not discover ordering sources.",
+        );
+      }
+      if (discovery.sources.length === 0) {
+        throw new Error("No public menu or ordering website was found for this restaurant.");
+      }
+
+      const menuResponse = await fetch("/api/restaurants/menu", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          placeId: candidate.id,
+          restaurantName: candidate.name,
+          sources: discovery.sources,
+        }),
+      });
+      const menu = (await menuResponse.json()) as RestaurantMenuResult | { error: string };
+      if (!menuResponse.ok || "error" in menu) {
+        throw new Error("error" in menu ? menu.error : "Could not extract this menu.");
+      }
+
+      const extractionWarnings = menu.menus.flatMap((entry) => entry.warnings);
+      setCandidateMenus((current) => ({
+        ...current,
+        [candidate.id]: {
+          status: "success",
+          sources: discovery.sources,
+          items: menu.items,
+          warnings: [...discovery.warnings, ...extractionWarnings],
+          priceSummary: menu.priceSummary,
+        },
+      }));
+
+      const lower = menu.priceSummary.lowerQuartile;
+      const upper = menu.priceSummary.upperQuartile;
+      const median = menu.priceSummary.median;
+      if (lower !== null && upper !== null && median !== null) {
+        setCandidates((current) =>
+          current.map((entry) =>
+            entry.id === candidate.id
+              ? {
+                  ...entry,
+                  estimatedPriceMin: Math.round(lower),
+                  estimatedPriceMax: Math.round(upper),
+                  pricePerPerson: Math.round(median),
+                }
+              : entry,
+          ),
+        );
+      }
+    } catch (error) {
+      setCandidateMenus((current) => ({
+        ...current,
+        [candidate.id]: {
+          status: "error",
+          sources: [],
+          items: [],
+          warnings: [],
+          error: error instanceof Error ? error.message : "Could not load this menu.",
+        },
+      }));
+    }
+  }
 
   function updateDraft<K extends keyof PreferenceDraft>(
     field: K,
@@ -1501,6 +1621,77 @@ export default function RoomPage() {
                                     <p className="mt-1 text-sm text-gray-400">
                                         {candidate.address}
                                     </p>
+
+                                    <div className="mt-4 flex flex-wrap gap-2">
+                                      <button
+                                        type="button"
+                                        onClick={() => handleLoadMenu(candidate)}
+                                        disabled={candidateMenus[candidate.id]?.status === "loading"}
+                                        className="rounded-xl border border-purple-300/20 bg-purple-500/15 px-3 py-2 text-xs font-semibold text-purple-100 transition hover:bg-purple-500/25 disabled:cursor-wait disabled:opacity-60"
+                                      >
+                                        {candidateMenus[candidate.id]?.status === "loading"
+                                          ? "Finding menus..."
+                                          : candidateMenus[candidate.id]?.status === "success"
+                                            ? "Refresh menu"
+                                            : "Find menu"}
+                                      </button>
+
+                                      {candidate.googleMapsUri && (
+                                        <a
+                                          href={candidate.googleMapsUri}
+                                          target="_blank"
+                                          rel="noreferrer"
+                                          className="rounded-xl border border-white/10 px-3 py-2 text-xs font-semibold text-gray-300 transition hover:bg-white/10"
+                                        >
+                                          Google Maps ↗
+                                        </a>
+                                      )}
+                                    </div>
+
+                                    {candidateMenus[candidate.id]?.status === "error" && (
+                                      <p className="mt-3 text-xs leading-5 text-red-300">
+                                        {candidateMenus[candidate.id].error}
+                                      </p>
+                                    )}
+
+                                    {candidateMenus[candidate.id]?.status === "success" && (
+                                      <div className="mt-4 rounded-xl border border-white/10 bg-black/20 p-3">
+                                        <div className="flex items-center justify-between gap-3 text-xs">
+                                          <span className="font-semibold text-emerald-200">
+                                            {candidateMenus[candidate.id].items.length} menu items
+                                          </span>
+                                          <span className="text-gray-400">
+                                            {candidateMenus[candidate.id].sources.length} source
+                                            {candidateMenus[candidate.id].sources.length === 1 ? "" : "s"}
+                                          </span>
+                                        </div>
+
+                                        {candidateMenus[candidate.id].items.length > 0 ? (
+                                          <ul className="mt-3 space-y-2 text-xs text-gray-300">
+                                            {candidateMenus[candidate.id].items.slice(0, 3).map((item) => (
+                                              <li key={item.id} className="flex justify-between gap-3">
+                                                <span className="truncate">{item.name}</span>
+                                                {typeof item.price === "number" && (
+                                                  <span className="shrink-0 text-gray-400">
+                                                    ${item.price.toFixed(2)}
+                                                  </span>
+                                                )}
+                                              </li>
+                                            ))}
+                                          </ul>
+                                        ) : (
+                                          <p className="mt-2 text-xs leading-5 text-amber-200">
+                                            Sources were found, but no menu items could be recognized yet.
+                                          </p>
+                                        )}
+
+                                        {candidateMenus[candidate.id].warnings.length > 0 && (
+                                          <p className="mt-3 text-[11px] leading-4 text-gray-500">
+                                            {candidateMenus[candidate.id].warnings[0]}
+                                          </p>
+                                        )}
+                                      </div>
+                                    )}
 
                                     <div className="mt-5">
                                       <span
