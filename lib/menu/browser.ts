@@ -108,7 +108,11 @@ export async function discoverGoogleOrderingLinks(googleMapsUrl: string): Promis
     await page.goto(safeUrl.toString(), { waitUntil: "domcontentloaded", timeout: 25_000 });
     await page.waitForTimeout(1_500);
 
-    const orderControl = page.locator("button, a").filter({ hasText: orderText }).first();
+    const orderControl = page
+      .getByRole("button", { name: orderText })
+      .or(page.getByRole("link", { name: orderText }))
+      .or(page.locator("button, a").filter({ hasText: orderText }))
+      .first();
     if (await orderControl.count()) {
       await orderControl.click({ timeout: 8_000 }).catch(() => undefined);
       await page.waitForTimeout(2_000);
