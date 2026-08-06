@@ -18,14 +18,10 @@ import type {
 } from "@/lib/menu/types";
 
 import {
-  evaluateBudgetScore,
-  evaluateDistanceScore,
   evaluateRestaurantScore,
-  combineScores,
-  importanceWeight,
 } from "@/lib/scoring";
 
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
 import { useParams, useSearchParams } from "next/navigation";
 
 type StructuredPreferenceData = {
@@ -376,6 +372,8 @@ export default function RoomPage() {
     Record<string, CandidateMenuState>
   >({});
 
+  const menuEnrichmentRunRef = useRef(0);
+
   const [privateOriginAddress, setPrivateOriginAddress] =
   useState("");
 
@@ -526,6 +524,9 @@ export default function RoomPage() {
   }
 
   async function handleGenerateCandidates() {
+    const enrichmentRun =
+      menuEnrichmentRunRef.current + 1;
+    menuEnrichmentRunRef.current = enrichmentRun;
     setIsGeneratingCandidates(true);
     setCandidateGenerationError("");
 
@@ -564,6 +565,10 @@ export default function RoomPage() {
 
         setCandidates(data.candidates);
         setCandidateMenus({});
+        void enrichCandidateMenus(
+          data.candidates,
+          enrichmentRun,
+        );
     } catch (error) {
         const message =
         error instanceof Error
@@ -576,7 +581,21 @@ export default function RoomPage() {
     }
 }
 
-  async function handleLoadMenu(candidate: RestaurantCandidate) {
+  async function handleLoadMenu(
+    candidate: RestaurantCandidate,
+    enrichmentRun = menuEnrichmentRunRef.current,
+  ) {
+    if (enrichmentRun !== menuEnrichmentRunRef.current) {
+      return;
+    }
+
+    setCandidates((current) =>
+      current.map((entry) =>
+        entry.id === candidate.id
+          ? { ...entry, menuStatus: "loading" }
+          : entry,
+      ),
+    );
     setCandidateMenus((current) => ({
       ...current,
       [candidate.id]: {
@@ -628,6 +647,10 @@ export default function RoomPage() {
       }
 
       const extractionWarnings = menu.menus.flatMap((entry) => entry.warnings);
+      if (enrichmentRun !== menuEnrichmentRunRef.current) {
+        return;
+      }
+
       setCandidateMenus((current) => ({
         ...current,
         [candidate.id]: {
@@ -642,21 +665,39 @@ export default function RoomPage() {
       const lower = menu.priceSummary.lowerQuartile;
       const upper = menu.priceSummary.upperQuartile;
       const median = menu.priceSummary.median;
-      if (lower !== null && upper !== null && median !== null) {
-        setCandidates((current) =>
-          current.map((entry) =>
-            entry.id === candidate.id
-              ? {
-                  ...entry,
-                  estimatedPriceMin: Math.round(lower),
-                  estimatedPriceMax: Math.round(upper),
-                  pricePerPerson: Math.round(median),
-                }
-              : entry,
-          ),
-        );
-      }
+      const hasMenuPrices =
+        lower !== null &&
+        upper !== null &&
+        median !== null;
+
+      setCandidates((current) =>
+        current.map((entry) =>
+          entry.id === candidate.id
+            ? {
+                ...entry,
+                estimatedPriceMin: hasMenuPrices
+                  ? Math.round(lower)
+                  : null,
+                estimatedPriceMax: hasMenuPrices
+                  ? Math.round(upper)
+                  : null,
+                pricePerPerson: hasMenuPrices
+                  ? Math.round(median)
+                  : null,
+                menuStatus: hasMenuPrices
+                  ? "loaded"
+                  : "unavailable",
+                menuItemCount: menu.items.length,
+                orderingSources: discovery.sources,
+              }
+            : entry,
+        ),
+      );
     } catch (error) {
+      if (enrichmentRun !== menuEnrichmentRunRef.current) {
+        return;
+      }
+
       setCandidateMenus((current) => ({
         ...current,
         [candidate.id]: {
@@ -667,7 +708,48 @@ export default function RoomPage() {
           error: error instanceof Error ? error.message : "Could not load this menu.",
         },
       }));
+      setCandidates((current) =>
+        current.map((entry) =>
+          entry.id === candidate.id
+            ? {
+                ...entry,
+                menuStatus: "unavailable",
+                estimatedPriceMin: null,
+                estimatedPriceMax: null,
+                pricePerPerson: null,
+              }
+            : entry,
+        ),
+      );
     }
+  }
+
+  async function enrichCandidateMenus(
+    restaurantCandidates: RestaurantCandidate[],
+    enrichmentRun: number,
+  ) {
+    let nextCandidateIndex = 0;
+
+    async function worker() {
+      while (
+        enrichmentRun === menuEnrichmentRunRef.current
+      ) {
+        const candidate =
+          restaurantCandidates[nextCandidateIndex];
+        nextCandidateIndex += 1;
+
+        if (!candidate) {
+          return;
+        }
+
+        await handleLoadMenu(
+          candidate,
+          enrichmentRun,
+        );
+      }
+    }
+
+    await Promise.all([worker(), worker()]);
   }
 
   function updateDraft<K extends keyof PreferenceDraft>(
@@ -1136,10 +1218,24 @@ export default function RoomPage() {
         ...score,
       };
     })
-    .sort(
-      (a, b) =>
-        b.totalScore - a.totalScore,
-    );
+    .sort((a, b) => {
+      if (
+        a.totalScore === null &&
+        b.totalScore === null
+      ) {
+        return a.candidate.distanceMiles -
+          b.candidate.distanceMiles;
+      }
+      if (a.totalScore === null) return 1;
+      if (b.totalScore === null) return -1;
+      return b.totalScore - a.totalScore;
+    });
+
+  const completedMenuChecks = candidates.filter(
+    (candidate) =>
+      candidate.menuStatus === "loaded" ||
+      candidate.menuStatus === "unavailable",
+  ).length;
 
 
   if (!hasLoaded) {
@@ -1542,6 +1638,12 @@ export default function RoomPage() {
                                     {candidates.length} options
                                 </span>
 
+                                {candidates.length > 0 && (
+                                  <span className="rounded-full border border-white/10 bg-white/10 px-3 py-1 text-sm font-semibold text-gray-200">
+                                    {completedMenuChecks}/{candidates.length} menus checked
+                                  </span>
+                                )}
+
                                 <button
                                     type="button"
                                     onClick={handleGenerateCandidates}
@@ -1609,9 +1711,15 @@ export default function RoomPage() {
                                         </span>
 
                                         <p className="mt-1 text-sm text-gray-400">
-                                        ${candidate.estimatedPriceMin}-
-                                        ${candidate.estimatedPriceMax} / person
-                                      </p>
+                                          {typeof candidate.estimatedPriceMin === "number" &&
+                                          typeof candidate.estimatedPriceMax === "number"
+                                            ? `$${candidate.estimatedPriceMin}-$${candidate.estimatedPriceMax} · menu items`
+                                            : candidate.menuStatus === "unavailable"
+                                              ? "Menu price unavailable"
+                                              : candidate.menuStatus === "loading"
+                                                ? "Checking online menu..."
+                                                : "Queued for menu check..."}
+                                        </p>
                                     </div>
 
                                     <h3 className="mt-5 text-lg font-semibold text-white">
@@ -1626,14 +1734,19 @@ export default function RoomPage() {
                                       <button
                                         type="button"
                                         onClick={() => handleLoadMenu(candidate)}
-                                        disabled={candidateMenus[candidate.id]?.status === "loading"}
+                                        disabled={
+                                          candidate.menuStatus === "pending" ||
+                                          candidate.menuStatus === "loading"
+                                        }
                                         className="rounded-xl border border-purple-300/20 bg-purple-500/15 px-3 py-2 text-xs font-semibold text-purple-100 transition hover:bg-purple-500/25 disabled:cursor-wait disabled:opacity-60"
                                       >
-                                        {candidateMenus[candidate.id]?.status === "loading"
-                                          ? "Finding menus..."
+                                        {candidate.menuStatus === "pending"
+                                          ? "Menu check queued"
+                                          : candidateMenus[candidate.id]?.status === "loading"
+                                            ? "Checking ordering sites..."
                                           : candidateMenus[candidate.id]?.status === "success"
                                             ? "Refresh menu"
-                                            : "Find menu"}
+                                            : "Retry menu"}
                                       </button>
 
                                       {candidate.googleMapsUri && (
@@ -1706,7 +1819,9 @@ export default function RoomPage() {
                                       text-purple-200
                                       "
                                       >
-                                          Score {Math.round(totalScore * 100)}%
+                                          {totalScore === null
+                                            ? "Score pending"
+                                            : `Score ${Math.round(totalScore * 100)}%`}
                                       </span>
                                   </div>
 
@@ -1727,7 +1842,9 @@ export default function RoomPage() {
                                           </span>
 
                                           <span>
-                                              {Math.round(item.score * 100)}%
+                                              {item.score === null
+                                                ? "pending"
+                                                : `${Math.round(item.score * 100)}%`}
                                           </span>
                                       </div>
                                   ))
