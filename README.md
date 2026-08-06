@@ -1,36 +1,63 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Private Council
 
-## Getting Started
+Private Council lets participants share planning constraints privately and ranks
+restaurant candidates without exposing the underlying reasons.
 
-First, run the development server:
+## Local development
 
 ```bash
+npm install
+cp .env.example .env.local
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open [http://localhost:3000](http://localhost:3000).
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Restaurant and menu pipeline
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+The restaurant flow now has three stages:
 
-## Learn More
+1. `POST /api/generate-candidates` uses Google Geocoding and Places Nearby
+   Search to return real restaurants. Google price levels are used only as a
+   broad initial estimate.
+2. `POST /api/restaurants/ordering-sources` starts from a Google Place ID,
+   follows the restaurant website's menu/order links, and—when a browser is
+   configured—opens the Google Maps online-order control to collect additional
+   providers.
+3. `POST /api/restaurants/menu` extracts and normalizes menu items from up to
+   five discovered sources. It tries Schema.org JSON-LD, provider application
+   JSON, and semantic DOM markup. Dynamic pages are rendered with Playwright
+   when a browser is configured.
 
-To learn more about Next.js, take a look at the following resources:
+Candidate cards expose this as a lazy **Find menu** action. Menu-derived
+quartiles replace the initial Google price-level estimate after extraction, so
+opening one restaurant's menu immediately improves its local budget score.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Environment variables
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+Required:
 
-## Deploy on Vercel
+- `GOOGLE_MAPS_API_KEY`: enables Geocoding, Nearby Search, and Place Details.
+- `OPENAI_API_KEY`: used by the existing preference interpretation routes.
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+Optional browser configuration (choose one):
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- `PLAYWRIGHT_WS_ENDPOINT`: a remote Chromium CDP WebSocket endpoint.
+- `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH`: an installed local Chromium binary.
+
+Without a browser, normal restaurant websites and server-rendered menu pages
+still work. Google Maps button interaction and JavaScript-only provider menus
+return a warning instead of failing the entire request.
+
+## Quality checks
+
+```bash
+npm test
+npm run lint
+npx tsc --noEmit
+npm run build
+```
+
+The fetcher accepts only public HTTPS destinations, validates every redirect,
+blocks private-network addresses, caps response size, and limits one restaurant
+request to five menu sources.
