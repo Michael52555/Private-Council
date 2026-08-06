@@ -1,4 +1,5 @@
 import { chromium, type Browser, type BrowserContext, type Page } from "playwright-core";
+import { existsSync } from "node:fs";
 import { dedupeSources, inferProvider, makeOrderingSource } from "@/lib/menu/providers";
 import { assertPublicHttpsUrl } from "@/lib/menu/security";
 import type { OrderingSource } from "@/lib/menu/types";
@@ -12,11 +13,34 @@ export class BrowserNotConfiguredError extends Error {
   }
 }
 
+function systemChromePath(): string | undefined {
+  const candidates =
+    process.platform === "darwin"
+      ? [
+          "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+          "/Applications/Chromium.app/Contents/MacOS/Chromium",
+        ]
+      : process.platform === "win32"
+        ? [
+            `${process.env.PROGRAMFILES ?? "C:\\Program Files"}\\Google\\Chrome\\Application\\chrome.exe`,
+            `${process.env["PROGRAMFILES(X86)"] ?? "C:\\Program Files (x86)"}\\Google\\Chrome\\Application\\chrome.exe`,
+          ]
+        : [
+            "/usr/bin/google-chrome",
+            "/usr/bin/google-chrome-stable",
+            "/usr/bin/chromium",
+            "/usr/bin/chromium-browser",
+          ];
+
+  return candidates.find((candidate) => existsSync(candidate));
+}
+
 export function isBrowserConfigured(): boolean {
   return Boolean(
-    process.env.PLAYWRIGHT_WS_ENDPOINT ||
+      process.env.PLAYWRIGHT_WS_ENDPOINT ||
       process.env.BROWSER_WS_ENDPOINT ||
-      process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH,
+      process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH ||
+      systemChromePath(),
   );
 }
 
@@ -26,7 +50,9 @@ async function openBrowser(): Promise<{ browser: Browser; remote: boolean }> {
     return { browser: await chromium.connectOverCDP(wsEndpoint), remote: true };
   }
 
-  const executablePath = process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH;
+  const executablePath =
+    process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH ??
+    systemChromePath();
   if (executablePath) {
     return {
       browser: await chromium.launch({ executablePath, headless: true }),
