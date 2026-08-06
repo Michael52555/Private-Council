@@ -21,7 +21,7 @@ function firstString(...values: unknown[]): string | undefined {
 
 function parsePrice(value: unknown, centsLikely = false): number | undefined {
   if (typeof value === "number" && Number.isFinite(value) && value >= 0) {
-    if (centsLikely && Number.isInteger(value) && value >= 300) return value / 100;
+    if (centsLikely && Number.isInteger(value) && value >= 100) return value / 100;
     return value;
   }
 
@@ -206,8 +206,12 @@ export function extractMenuFromHtml(
     }
   });
 
-  if (inferProvider(source.url).provider !== "restaurant_website") {
-    $('script#__NEXT_DATA__, script[type="application/json"]').each((_, element) => {
+  const embeddedJsonSelector =
+    inferProvider(source.url).provider === "restaurant_website"
+      ? "script#__NEXT_DATA__"
+      : 'script#__NEXT_DATA__, script[type="application/json"]';
+
+  $(embeddedJsonSelector).each((_, element) => {
       const text = $(element).text();
       if (!text || text.length > 2_500_000) return;
       try {
@@ -218,8 +222,7 @@ export function extractMenuFromHtml(
       } catch {
         // Continue with DOM extraction.
       }
-    });
-  }
+  });
 
   const itemSelectors = [
     '[itemtype$="MenuItem"]',
