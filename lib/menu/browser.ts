@@ -541,22 +541,54 @@ export async function discoverGoogleOrderingLinks(
       };
     }
 
-    const visibleDialog = page.locator('[role="dialog"]:visible, [aria-modal="true"]:visible').last();
-    const dialogPromise = visibleDialog.waitFor({ state: "visible", timeout: 6_000 });
+    const originalPageDialog = page
+      .locator('[role="dialog"]:visible, [aria-modal="true"]:visible')
+      .last();
+    const dialogPromise = originalPageDialog.waitFor({
+      state: "visible",
+      timeout: 6_000,
+    });
+    let popupPage: Page | undefined;
+    const popupPromise = context
+      .waitForEvent("page", { timeout: 6_000 })
+      .then((openedPage) => {
+        popupPage = openedPage;
+      })
+      .catch(() => undefined);
     orderControlActivated = true;
     await orderControl.click({ timeout: 8_000 });
     await Promise.race([
       dialogPromise.catch(() => undefined),
-      page.waitForTimeout(2_500),
+      popupPromise,
+      page.waitForTimeout(3_000),
     ]);
+    if (
+      !popupPage &&
+      !(await originalPageDialog.isVisible().catch(() => false))
+    ) {
+      await popupPromise;
+    }
 
+    const orderingPage = popupPage ?? page;
+    if (popupPage) {
+      await orderingPage
+        .waitForLoadState("domcontentloaded", { timeout: 10_000 })
+        .catch(() => undefined);
+      await dismissGoogleConsent(orderingPage).catch(() => false);
+      await orderingPage.waitForTimeout(1_000);
+    }
+
+    const visibleDialog = orderingPage
+      .locator('[role="dialog"]:visible, [aria-modal="true"]:visible')
+      .last();
     const dialogVisible = await visibleDialog.isVisible().catch(() => false);
+    const separateOrderingSurface = orderingPage !== page;
     const inspectedLinks = dialogVisible
       ? await collectLinks(visibleDialog).catch(() => [] as LinkCandidate[])
-      : await collectPageLinks(page);
+      : await collectPageLinks(orderingPage);
     const selectedLinks = selectGoogleOrderingLinkCandidates(inspectedLinks, {
       baselineHrefs,
-      withinDialog: dialogVisible,
+      withinDialog: dialogVisible || separateOrderingSurface,
     });
     const primarySelectedLink = selectedLinks[0];
 
@@ -571,13 +603,13 @@ export async function discoverGoogleOrderingLinks(
 
     const providerControls =
       !primarySelectedLink && navigationCandidates.length === 0
-        ? await findProviderControls(page, new Set(visibleControlLabels))
+        ? await findProviderControls(orderingPage, new Set(visibleControlLabels))
         : [];
     const primaryProviderControl = providerControls[0];
 
     if (primaryProviderControl) {
       await primaryProviderControl.locator.click({ timeout: 5_000 }).catch(() => undefined);
-      await page.waitForTimeout(2_500);
+      await orderingPage.waitForTimeout(2_500);
     }
 
     const finalNavigationCandidate = navigationCandidates.at(-1);
@@ -640,6 +672,7 @@ export async function discoverGoogleOrderingLinks(
         orderControlFound: true,
         ...(orderControlLabel ? { orderControlLabel } : {}),
         orderControlLayout,
+        orderingSurface: separateOrderingSurface ? "new_page" : "same_page",
         finalGoogleMapsUrl,
         ...(pageTitle ? { pageTitle } : {}),
         consentHandled,

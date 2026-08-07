@@ -33,6 +33,7 @@ export type OrderingDiscoveryDiagnostics = {
   orderControlFound: boolean;
   orderControlLabel?: string;
   orderControlLayout?: "desktop" | "mobile";
+  orderingSurface?: "same_page" | "new_page";
   finalGoogleMapsUrl?: string;
   pageTitle?: string;
   consentHandled: boolean;

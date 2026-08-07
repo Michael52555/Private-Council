@@ -2062,6 +2062,9 @@ export default function RoomPage() {
                                               {candidateOrdering[candidate.id].diagnostics?.orderControlLayout
                                                 ? ` · ${candidateOrdering[candidate.id].diagnostics?.orderControlLayout} layout`
                                                 : ""}
+                                              {candidateOrdering[candidate.id].diagnostics?.orderingSurface
+                                                ? ` · ${candidateOrdering[candidate.id].diagnostics?.orderingSurface?.replaceAll("_", " ")}`
+                                                : ""}
                                             </p>
                                             <p>
                                               Result scope: {candidateOrdering[candidate.id].diagnostics?.resultScope}
