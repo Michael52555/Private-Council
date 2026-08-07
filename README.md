@@ -19,8 +19,9 @@ The current restaurant flow deliberately separates provider discovery from menu
 extraction:
 
 1. `POST /api/generate-candidates` uses Google Geocoding and Places Nearby
-   Search to return real restaurants. Candidates start with no dollar estimate;
-   Google price levels are retained only as metadata and never enter scoring.
+   Search to return real restaurants. A numeric Google `priceRange` becomes a
+   medium-confidence budget fallback. If only `priceLevel` exists, the app uses
+   a broad, explicitly low-confidence US-dollar band.
 2. `POST /api/restaurants/ordering-sources` opens the restaurant's Google Maps
    listing, targets its **Online ordering** control, and returns only provider
    URLs exposed by that interaction. The ordinary restaurant website is
@@ -30,11 +31,12 @@ extraction:
    across the current ten restaurants so the next extraction adapters can be
    chosen from observed data.
 
-After candidate generation, two workers inspect all ten restaurants. Menu-price
-extraction and budget scoring intentionally remain pending during this discovery
-phase; unverified DOM/embedded-JSON prices are not used. The existing
-`POST /api/restaurants/menu` experiment remains in the repository for the later
-provider-adapter phase, but the candidate workflow does not call it.
+After candidate generation, two workers inspect all ten restaurants. Exact menu
+extraction remains optional: the registered provider adapters try up to three
+Google-listed sources in order and stop at the first reliable priced menu. A
+successful menu replaces the Google fallback with a high-confidence estimate;
+blocked or unrecognized menus leave the Google fallback intact. If neither
+source provides numeric prices, budget scoring remains pending.
 
 ## Environment variables
 

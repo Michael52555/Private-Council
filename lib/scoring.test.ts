@@ -55,6 +55,15 @@ function candidate(
     pricePerPerson: null,
     estimatedPriceMin: null,
     estimatedPriceMax: null,
+    googleEstimatedPriceMin: null,
+    googleEstimatedPriceMax: null,
+    googleEstimatedPriceMidpoint: null,
+    googleBudgetEstimateSource: "unavailable",
+    googleBudgetEstimateConfidence: "none",
+    googleBudgetEstimateCurrency: null,
+    budgetEstimateSource: "unavailable",
+    budgetEstimateConfidence: "none",
+    budgetEstimateCurrency: null,
     menuStatus: "pending",
     menuItemCount: 0,
     orderingSources: [],
@@ -89,4 +98,29 @@ test("scores the budget only after menu-derived prices load", () => {
 
   assert.equal(score.breakdown[1].score, 25 / 30);
   assert.equal(score.totalScore, (1 + 25 / 30) / 2);
+});
+
+test("uses a Google budget fallback while exact menu prices remain unavailable", () => {
+  const score = evaluateRestaurantScore(
+    candidate({
+      estimatedPriceMin: 15,
+      estimatedPriceMax: 40,
+      pricePerPerson: 27.5,
+      googleEstimatedPriceMin: 15,
+      googleEstimatedPriceMax: 40,
+      googleEstimatedPriceMidpoint: 27.5,
+      googleBudgetEstimateSource: "google_price_level",
+      googleBudgetEstimateConfidence: "low",
+      googleBudgetEstimateCurrency: "USD",
+      budgetEstimateSource: "google_price_level",
+      budgetEstimateConfidence: "low",
+      budgetEstimateCurrency: "USD",
+      menuStatus: "unavailable",
+    }),
+    preferences,
+  );
+
+  assert.equal(score.breakdown[1].status, "ready");
+  assert.equal(score.breakdown[1].score, 15 / 25);
+  assert.equal(score.totalScore, (1 + 15 / 25) / 2);
 });

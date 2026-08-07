@@ -1,4 +1,8 @@
 import { NextResponse } from "next/server";
+import {
+  googleBudgetEstimate,
+  type GooglePriceRange,
+} from "@/lib/budget-estimate";
 import type { RestaurantCandidate } from "@/lib/planning-types";
 
 type GeocodedOrigin = {
@@ -24,6 +28,7 @@ type GoogleNearbyPlace = {
   websiteUri?: string;
   googleMapsUri?: string;
   priceLevel?: string;
+  priceRange?: GooglePriceRange;
   rating?: number;
   userRatingCount?: number;
 };
@@ -108,7 +113,7 @@ async function searchNearbyRestaurants(
       "X-Goog-FieldMask":
         "places.id,places.displayName,places.formattedAddress,places.location," +
         "places.websiteUri,places.googleMapsUri,places.priceLevel,places.rating," +
-        "places.userRatingCount",
+        "places.priceRange,places.userRatingCount",
     },
     body: JSON.stringify({
       includedTypes: ["restaurant"],
@@ -148,6 +153,10 @@ async function searchNearbyRestaurants(
       continue;
     }
 
+    const googleBudget = googleBudgetEstimate({
+      priceRange: place.priceRange,
+      priceLevel: place.priceLevel,
+    });
     candidates.push({
       id,
       name,
@@ -158,9 +167,18 @@ async function searchNearbyRestaurants(
         latitude,
         longitude,
       ),
-      pricePerPerson: null,
-      estimatedPriceMin: null,
-      estimatedPriceMax: null,
+      pricePerPerson: googleBudget.midpoint,
+      estimatedPriceMin: googleBudget.minimum,
+      estimatedPriceMax: googleBudget.maximum,
+      googleEstimatedPriceMin: googleBudget.minimum,
+      googleEstimatedPriceMax: googleBudget.maximum,
+      googleEstimatedPriceMidpoint: googleBudget.midpoint,
+      googleBudgetEstimateSource: googleBudget.source,
+      googleBudgetEstimateConfidence: googleBudget.confidence,
+      googleBudgetEstimateCurrency: googleBudget.currency,
+      budgetEstimateSource: googleBudget.source,
+      budgetEstimateConfidence: googleBudget.confidence,
+      budgetEstimateCurrency: googleBudget.currency,
       menuStatus: "pending",
       menuItemCount: 0,
       priceLevel: place.priceLevel,

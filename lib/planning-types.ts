@@ -66,6 +66,18 @@ export type MenuEnrichmentStatus =
   | "loaded"
   | "unavailable";
 
+export type BudgetEstimateSource =
+  | "menu"
+  | "google_price_range"
+  | "google_price_level"
+  | "unavailable";
+
+export type BudgetEstimateConfidence =
+  | "high"
+  | "medium"
+  | "low"
+  | "none";
+
 export type RestaurantCandidate = CandidatePlan & {
   id: string;
   name: string;
@@ -74,6 +86,15 @@ export type RestaurantCandidate = CandidatePlan & {
 
   estimatedPriceMin: number | null;
   estimatedPriceMax: number | null;
+  googleEstimatedPriceMin: number | null;
+  googleEstimatedPriceMax: number | null;
+  googleEstimatedPriceMidpoint: number | null;
+  googleBudgetEstimateSource: Exclude<BudgetEstimateSource, "menu">;
+  googleBudgetEstimateConfidence: BudgetEstimateConfidence;
+  googleBudgetEstimateCurrency: string | null;
+  budgetEstimateSource: BudgetEstimateSource;
+  budgetEstimateConfidence: BudgetEstimateConfidence;
+  budgetEstimateCurrency: string | null;
   menuStatus: MenuEnrichmentStatus;
   menuItemCount: number;
   priceLevel?: string;

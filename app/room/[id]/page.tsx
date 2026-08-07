@@ -379,6 +379,52 @@ function PrimaryMenuPanel({ state }: { state?: CandidateMenuState }) {
   );
 }
 
+function BudgetEstimatePanel({ candidate }: { candidate: RestaurantCandidate }) {
+  const minimum = candidate.estimatedPriceMin;
+  const maximum = candidate.estimatedPriceMax;
+  const hasRange = typeof minimum === "number" && typeof maximum === "number";
+  const sourceLabel = candidate.budgetEstimateSource === "menu"
+    ? "Menu-derived item range"
+    : candidate.budgetEstimateSource === "google_price_range"
+      ? "Google price range"
+      : candidate.budgetEstimateSource === "google_price_level"
+        ? "Google price-level estimate"
+        : "Budget estimate unavailable";
+  const confidenceLabel = candidate.budgetEstimateConfidence === "none"
+    ? null
+    : `${candidate.budgetEstimateConfidence} confidence`;
+  const currencyPrefix = !candidate.budgetEstimateCurrency || candidate.budgetEstimateCurrency === "USD"
+    ? "$"
+    : `${candidate.budgetEstimateCurrency} `;
+
+  return (
+    <div className="mt-4 rounded-xl border border-sky-300/15 bg-sky-500/5 p-3 text-xs">
+      <div className="flex items-start justify-between gap-3">
+        <span className="font-semibold text-sky-200">{sourceLabel}</span>
+        {confidenceLabel && (
+          <span className="shrink-0 text-[10px] uppercase tracking-wide text-sky-200/60">
+            {confidenceLabel}
+          </span>
+        )}
+      </div>
+      {hasRange ? (
+        <p className="mt-2 text-sm font-semibold text-white">
+          {currencyPrefix}{minimum.toFixed(2)}–{currencyPrefix}{maximum.toFixed(2)} per person
+        </p>
+      ) : (
+        <p className="mt-2 leading-5 text-amber-200/80">
+          No numeric menu or Google price estimate is available, so budget scoring remains pending.
+        </p>
+      )}
+      {candidate.budgetEstimateSource === "google_price_level" && (
+        <p className="mt-2 text-[10px] leading-4 text-gray-500">
+          Broad heuristic band derived from Google&apos;s price level; exact menu prices can replace it later.
+        </p>
+      )}
+    </div>
+  );
+}
+
 function renderPreferenceDetails(preference: Preference) {
 
   console.log(
@@ -791,9 +837,6 @@ export default function RoomPage() {
           entry.id === candidate.id
             ? {
                 ...entry,
-                estimatedPriceMin: null,
-                estimatedPriceMax: null,
-                pricePerPerson: null,
                 menuStatus: discovery.sources.length > 0
                   ? "loaded"
                   : "unavailable",
@@ -824,9 +867,6 @@ export default function RoomPage() {
             ? {
                 ...entry,
                 menuStatus: "unavailable",
-                estimatedPriceMin: null,
-                estimatedPriceMax: null,
-                pricePerPerson: null,
               }
             : entry,
         ),
@@ -905,13 +945,22 @@ export default function RoomPage() {
                 ...entry,
                 estimatedPriceMin: hasReliablePriceSample
                   ? data.priceSummary.lowerQuartile ?? data.priceSummary.minimum
-                  : null,
+                  : entry.googleEstimatedPriceMin,
                 estimatedPriceMax: hasReliablePriceSample
                   ? data.priceSummary.upperQuartile ?? data.priceSummary.maximum
-                  : null,
+                  : entry.googleEstimatedPriceMax,
                 pricePerPerson: hasReliablePriceSample
                   ? data.priceSummary.median
-                  : null,
+                  : entry.googleEstimatedPriceMidpoint,
+                budgetEstimateSource: hasReliablePriceSample
+                  ? "menu"
+                  : entry.googleBudgetEstimateSource,
+                budgetEstimateConfidence: hasReliablePriceSample
+                  ? "high"
+                  : entry.googleBudgetEstimateConfidence,
+                budgetEstimateCurrency: hasReliablePriceSample
+                  ? data.priceSummary.currency ?? "USD"
+                  : entry.googleBudgetEstimateCurrency,
                 menuItemCount: data.items.length,
               }
             : entry,
@@ -1950,6 +1999,8 @@ export default function RoomPage() {
                                         {candidate.address}
                                     </p>
 
+                                    <BudgetEstimatePanel candidate={candidate} />
+
                                     <div className="mt-4 flex flex-wrap gap-2">
                                       <button
                                         type="button"
@@ -2156,6 +2207,9 @@ export default function RoomPage() {
                                       >
                                           <span>
                                               {item.category}
+                                              {item.category === "budget" && candidate.budgetEstimateConfidence !== "none"
+                                                ? ` · ${candidate.budgetEstimateConfidence} confidence`
+                                                : ""}
                                           </span>
 
                                           <span>
