@@ -55,6 +55,24 @@ export type MenuItem = {
   sourceId: string;
 };
 
+export type CapturedJsonPayload = {
+  url: string;
+  status: number;
+  contentType: string;
+  data: unknown;
+};
+
+export type MenuBrowserDiagnostics = {
+  navigationStatus?: number;
+  finalUrl: string;
+  locationSelectionAttempted: boolean;
+  locationSelectionSucceeded: boolean;
+  capturedJsonResponseCount: number;
+  blockedResponseCount: number;
+  capturedJsonEndpoints: string[];
+  blockedResponseEndpoints: string[];
+};
+
 export type ExtractedMenu = {
   source: OrderingSource;
   items: MenuItem[];

@@ -24,6 +24,7 @@ export async function POST(request: Request) {
     const body = (await request.json()) as {
       placeId?: unknown;
       restaurantName?: unknown;
+      restaurantAddress?: unknown;
       sources?: unknown;
     };
     const placeId = typeof body.placeId === "string" ? body.placeId.trim() : "";
@@ -42,6 +43,9 @@ export async function POST(request: Request) {
     const result = await extractRestaurantMenus({
       placeId,
       restaurantName: typeof body.restaurantName === "string" ? body.restaurantName.trim() : undefined,
+      restaurantAddress: typeof body.restaurantAddress === "string"
+        ? body.restaurantAddress.trim().slice(0, 500)
+        : undefined,
       sources,
     });
     return NextResponse.json(result);

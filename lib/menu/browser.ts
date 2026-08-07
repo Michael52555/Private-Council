@@ -15,9 +15,12 @@ import {
 import {
   menuAdapterForControlLabel,
   menuAdapterForUrl,
+  type MenuAdapterId,
 } from "@/lib/menu/adapters";
 import { assertPublicHttpsUrl } from "@/lib/menu/security";
 import type {
+  CapturedJsonPayload,
+  MenuBrowserDiagnostics,
   OrderingDiscoveryDiagnostics,
   OrderingSource,
 } from "@/lib/menu/types";
@@ -86,6 +89,11 @@ async function withPage<T>(task: (page: Page, context: BrowserContext) => Promis
   const context = await browser.newContext({
     locale: "en-US",
     viewport: { width: 1440, height: 1200 },
+    userAgent:
+      "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+    extraHTTPHeaders: {
+      "Accept-Language": "en-US,en;q=0.9",
+    },
   });
   const page = await context.newPage();
   page.setDefaultTimeout(8_000);
@@ -98,18 +106,179 @@ async function withPage<T>(task: (page: Page, context: BrowserContext) => Promis
   }
 }
 
-export async function renderPublicPage(rawUrl: string): Promise<{
+type RenderMenuPageOptions = {
+  adapterId?: MenuAdapterId;
+  restaurantAddress?: string;
+  restaurantName?: string;
+};
+
+export function providerStartUrl(
+  rawUrl: string,
+  options: RenderMenuPageOptions,
+): string {
+  if (
+    options.adapterId !== "panda_express" ||
+    !options.restaurantAddress
+  ) {
+    return rawUrl;
+  }
+
+  const url = new URL(rawUrl);
+  if (!/^\/locations\/?$/i.test(url.pathname)) return rawUrl;
+  const parts = options.restaurantAddress.split(",").map((part) => part.trim());
+  const city = parts.at(-3);
+  const stateMatch = parts.at(-2)?.match(/^([A-Z]{2})\b/i);
+  if (!city || !stateMatch) return rawUrl;
+  const citySlug = city
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "");
+  if (!citySlug) return rawUrl;
+  url.pathname = `/locations/${stateMatch[1].toLowerCase()}/${citySlug}/`;
+  return url.toString();
+}
+
+async function clickFirstVisible(page: Page, names: RegExp[]): Promise<boolean> {
+  for (const frame of page.frames()) {
+    for (const name of names) {
+      const controls = frame.getByRole("button", { name }).or(frame.getByRole("link", { name }));
+      const count = Math.min(await controls.count().catch(() => 0), 8);
+      for (let index = 0; index < count; index += 1) {
+        const control = controls.nth(index);
+        if (!(await control.isVisible().catch(() => false))) continue;
+        await control.click({ timeout: 3_000 }).catch(() => undefined);
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+async function dismissOrderingPageConsent(page: Page): Promise<void> {
+  await clickFirstVisible(page, [
+    /^accept(?: all)?$/i,
+    /^agree$/i,
+    /^allow all$/i,
+    /^continue$/i,
+    /^got it$/i,
+  ]).catch(() => false);
+}
+
+async function findLocationInput(page: Page): Promise<Locator | undefined> {
+  const selector = [
+    'input[placeholder*="address" i]',
+    'input[aria-label*="address" i]',
+    'input[placeholder*="location" i]',
+    'input[aria-label*="location" i]',
+    'input[placeholder*="city" i]',
+    'input[placeholder*="zip" i]',
+  ].join(",");
+
+  for (const frame of page.frames()) {
+    const inputs = frame.locator(selector);
+    const count = Math.min(await inputs.count().catch(() => 0), 12);
+    for (let index = 0; index < count; index += 1) {
+      const input = inputs.nth(index);
+      if (await input.isVisible().catch(() => false)) return input;
+    }
+  }
+  return undefined;
+}
+
+async function attemptLocationSelection(
+  page: Page,
+  address: string,
+): Promise<{ attempted: boolean; succeeded: boolean }> {
+  const initialUrl = page.url();
+  const addressStem = address.split(",")[0]?.trim();
+  let clickedResult = false;
+  if (addressStem && addressStem.length >= 4) {
+    for (const frame of page.frames()) {
+      const matches = frame.getByText(addressStem, { exact: false });
+      const count = Math.min(await matches.count().catch(() => 0), 6);
+      for (let index = 0; index < count; index += 1) {
+        const match = matches.nth(index);
+        if (!(await match.isVisible().catch(() => false))) continue;
+        const clickable = match.locator(
+          "xpath=ancestor-or-self::*[self::button or self::a or @role='button' or @role='link'][1] | ancestor::*[.//a or .//button][1]//a[contains(translate(normalize-space(.), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'order')][1] | ancestor::*[.//a or .//button][1]//button[contains(translate(normalize-space(.), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'order')][1]",
+        ).first();
+        if (await clickable.isVisible().catch(() => false)) {
+          await clickable.click({ timeout: 3_000 }).catch(() => undefined);
+          clickedResult = true;
+          break;
+        }
+      }
+      if (clickedResult) break;
+    }
+  }
+
+  const input = clickedResult ? undefined : await findLocationInput(page);
+  if (!clickedResult && input) {
+    await input.fill(address).catch(() => undefined);
+    await input.press("Enter").catch(() => undefined);
+    await page.waitForTimeout(1_500);
+  }
+
+  if (!clickedResult && !input) return { attempted: false, succeeded: false };
+
+  const clickedCta = clickedResult || await clickFirstVisible(page, [
+    /select (?:this )?location/i,
+    /start (?:an )?order/i,
+    /order (?:now|pickup|here)/i,
+    /view menu/i,
+    /pickup/i,
+  ]);
+  await page.waitForLoadState("domcontentloaded", { timeout: 8_000 }).catch(() => undefined);
+  await page.waitForTimeout(1_500);
+  return {
+    attempted: true,
+    succeeded: clickedCta || page.url() !== initialUrl,
+  };
+}
+
+async function triggerLazyMenuLoading(page: Page): Promise<void> {
+  await page.evaluate(async () => {
+    const heights = [0.35, 0.7, 1];
+    for (const ratio of heights) {
+      window.scrollTo(0, document.body.scrollHeight * ratio);
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    }
+    window.scrollTo(0, 0);
+  }).catch(() => undefined);
+}
+
+export async function renderPublicPage(rawUrl: string, options: RenderMenuPageOptions = {}): Promise<{
   html: string;
   finalUrl: string;
-  jsonPayloads: unknown[];
+  jsonPayloads: CapturedJsonPayload[];
+  diagnostics: MenuBrowserDiagnostics;
 }> {
-  const url = await assertPublicHttpsUrl(rawUrl);
-  return withPage(async (page) => {
-    const jsonPayloads: unknown[] = [];
+  const url = await assertPublicHttpsUrl(providerStartUrl(rawUrl, options));
+  return withPage(async (page, context) => {
+    const jsonPayloads: CapturedJsonPayload[] = [];
     const pendingCaptures = new Set<Promise<void>>();
     let capturedBytes = 0;
+    let blockedResponseCount = 0;
+    const capturedJsonEndpoints = new Set<string>();
+    const blockedResponseEndpoints = new Set<string>();
 
-    page.on("response", (response) => {
+    const safeEndpoint = (rawResponseUrl: string) => {
+      try {
+        const responseUrl = new URL(rawResponseUrl);
+        return `${responseUrl.hostname}${responseUrl.pathname}`.slice(0, 240);
+      } catch {
+        return "unknown endpoint";
+      }
+    };
+
+    context.on("response", (response) => {
+      if ([401, 403, 429].includes(response.status())) {
+        blockedResponseCount += 1;
+        if (blockedResponseEndpoints.size < 8) {
+          blockedResponseEndpoints.add(safeEndpoint(response.url()));
+        }
+      }
       if (jsonPayloads.length >= 60 || capturedBytes >= 12_000_000) return;
       const capture = (async () => {
         const contentType = (await response.headerValue("content-type")) ?? "";
@@ -127,7 +296,15 @@ export async function renderPublicPage(rawUrl: string): Promise<{
         capturedBytes += text.length;
         if (capturedBytes > 12_000_000) return;
         try {
-          jsonPayloads.push(JSON.parse(text) as unknown);
+          jsonPayloads.push({
+            url: response.url(),
+            status: response.status(),
+            contentType,
+            data: JSON.parse(text) as unknown,
+          });
+          if (capturedJsonEndpoints.size < 8) {
+            capturedJsonEndpoints.add(safeEndpoint(response.url()));
+          }
         } catch {
           // Ignore non-JSON responses with an inaccurate content type.
         }
@@ -135,13 +312,50 @@ export async function renderPublicPage(rawUrl: string): Promise<{
       pendingCaptures.add(capture);
     });
 
-    await page.goto(url.toString(), { waitUntil: "domcontentloaded", timeout: 20_000 });
+    const navigationResponse = await page.goto(url.toString(), {
+      waitUntil: "domcontentloaded",
+      timeout: 25_000,
+    });
+    await dismissOrderingPageConsent(page);
     await page.waitForLoadState("networkidle", { timeout: 6_000 }).catch(() => undefined);
+    let locationResult = options.restaurantAddress
+      ? await attemptLocationSelection(page, options.restaurantAddress)
+      : { attempted: false, succeeded: false };
+    await page.waitForTimeout(500);
+    let activePage = context.pages().at(-1) ?? page;
+    activePage.setDefaultTimeout(8_000);
+    await activePage.waitForLoadState("domcontentloaded", { timeout: 8_000 }).catch(() => undefined);
+    await dismissOrderingPageConsent(activePage);
+    if (activePage !== page && options.restaurantAddress) {
+      const popupLocationResult = await attemptLocationSelection(
+        activePage,
+        options.restaurantAddress,
+      );
+      locationResult = {
+        attempted: locationResult.attempted || popupLocationResult.attempted,
+        succeeded: locationResult.succeeded || popupLocationResult.succeeded,
+      };
+      await activePage.waitForTimeout(500);
+      activePage = context.pages().at(-1) ?? activePage;
+      activePage.setDefaultTimeout(8_000);
+    }
+    await triggerLazyMenuLoading(activePage);
+    await activePage.waitForLoadState("networkidle", { timeout: 6_000 }).catch(() => undefined);
     await Promise.allSettled([...pendingCaptures]);
     return {
-      html: await page.content(),
-      finalUrl: page.url(),
+      html: await activePage.content(),
+      finalUrl: activePage.url(),
       jsonPayloads,
+      diagnostics: {
+        navigationStatus: navigationResponse?.status(),
+        finalUrl: activePage.url(),
+        locationSelectionAttempted: locationResult.attempted,
+        locationSelectionSucceeded: locationResult.succeeded,
+        capturedJsonResponseCount: jsonPayloads.length,
+        blockedResponseCount,
+        capturedJsonEndpoints: [...capturedJsonEndpoints],
+        blockedResponseEndpoints: [...blockedResponseEndpoints],
+      },
     };
   });
 }

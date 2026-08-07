@@ -866,6 +866,7 @@ export default function RoomPage() {
         body: JSON.stringify({
           placeId: candidate.id,
           restaurantName: candidate.name,
+          restaurantAddress: candidate.address,
           sources: [primarySource],
         }),
       });

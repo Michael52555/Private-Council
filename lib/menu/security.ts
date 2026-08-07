@@ -80,7 +80,7 @@ export async function fetchPublicHtml(rawUrl: string): Promise<{
         Accept: "text/html,application/xhtml+xml",
         "Accept-Language": "en-US,en;q=0.9",
         "User-Agent":
-          "Mozilla/5.0 (compatible; PrivateCouncilMenuBot/0.1; +https://github.com/Michael52555/Private-Council)",
+          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
       },
     });
 

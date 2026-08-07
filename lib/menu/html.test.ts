@@ -114,6 +114,61 @@ test("extracts menu items from browser-captured provider JSON", () => {
   assert(result.methods.has("embedded_json"));
 });
 
+test("unwraps captured response metadata and recognizes nested provider money", () => {
+  const source = makeOrderingSource({
+    url: "https://order.toasttab.com/online/example",
+    discoveredFrom: "google_maps",
+  });
+  const result = extractMenuFromJsonPayloads(
+    [
+      {
+        url: "https://ws-api.toasttab.com/consumer-app-bff/menu",
+        status: 200,
+        contentType: "application/json",
+        data: {
+          categories: [{
+            name: "Entrees",
+            items: [{
+              displayName: "Garlic noodles",
+              priceInfo: {
+                basePriceMoney: { amount: 1599, currencyCode: "USD" },
+              },
+            }],
+          }],
+        },
+      },
+    ],
+    source,
+    "toast",
+  );
+
+  assert.equal(result.items.length, 1);
+  assert.equal(result.items[0].name, "Garlic noodles");
+  assert.equal(result.items[0].price, 15.99);
+});
+
+test("filters provider customization instructions from captured menus", () => {
+  const source = makeOrderingSource({
+    url: "https://www.doordash.com/store/example-123",
+    discoveredFrom: "google_maps",
+  });
+  const result = extractMenuFromJsonPayloads(
+    [{
+      menu: {
+        items: [
+          { name: "Chicken bowl", price: 1299 },
+          { name: "Choose a side", price: 199 },
+          { name: "Utensils", price: 0 },
+        ],
+      },
+    }],
+    source,
+    "doordash",
+  );
+
+  assert.deepEqual(result.items.map((item) => item.name), ["Chicken bowl"]);
+});
+
 test("discovers both known providers and custom order links", () => {
   const sources = discoverOrderLinksFromHtml(
     `

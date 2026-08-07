@@ -2,7 +2,8 @@ import { createHash } from "node:crypto";
 import * as cheerio from "cheerio";
 import type { AnyNode } from "domhandler";
 import { inferProvider, makeOrderingSource } from "@/lib/menu/providers";
-import type { MenuItem, OrderingSource } from "@/lib/menu/types";
+import type { MenuAdapterId } from "@/lib/menu/adapters";
+import type { CapturedJsonPayload, MenuItem, OrderingSource } from "@/lib/menu/types";
 
 type JsonObject = Record<string, unknown>;
 
@@ -112,17 +113,58 @@ function walkJsonLd(value: unknown, sourceId: string, items: MenuItem[], section
 }
 
 function embeddedPrice(node: JsonObject): { price?: number; currency?: string } {
-  for (const key of ["displayPrice", "priceText", "basePrice", "unitPrice", "price", "amount"]) {
-    const value = node[key];
-    if (isObject(value)) {
-      const rawAmount = value.unitAmount ?? value.amount ?? value.value;
-      const price = parsePrice(rawAmount, true);
+  const firstLevelPriceContainers = [node.priceInfo, node.price_info, node.money, node.basePriceMoney]
+    .filter(isObject);
+  const priceContainers = [
+    ...firstLevelPriceContainers,
+    ...firstLevelPriceContainers.flatMap((container) => [
+      container.money,
+      container.basePriceMoney,
+      container.price,
+    ]).filter(isObject),
+  ];
+  const priceNodes = [node, ...priceContainers];
+
+  for (const priceNode of priceNodes) {
+    for (const key of [
+      "displayPrice",
+      "priceText",
+      "formattedPrice",
+      "basePrice",
+      "startingPrice",
+      "menuItemPrice",
+      "unitPrice",
+      "price",
+      "cost",
+      "amount",
+      "unitAmount",
+      "cents",
+    ]) {
+      const value = priceNode[key];
+      if (isObject(value)) {
+        const rawAmount = value.unitAmount ?? value.amount ?? value.value ?? value.cents;
+        const price = parsePrice(rawAmount, true);
+        if (price !== undefined) {
+          return {
+            price,
+            currency: firstString(
+              value.currencyCode,
+              value.currency,
+              priceNode.currencyCode,
+              node.currencyCode,
+            ),
+          };
+        }
+      }
+      const centsLikely = !["displayPrice", "priceText", "formattedPrice"].includes(key);
+      const price = parsePrice(value, centsLikely);
       if (price !== undefined) {
-        return { price, currency: firstString(value.currencyCode, value.currency, node.currencyCode) };
+        return {
+          price,
+          currency: firstString(priceNode.currencyCode, priceNode.currency, node.currencyCode, node.currency),
+        };
       }
     }
-    const price = parsePrice(value, key !== "displayPrice" && key !== "priceText");
-    if (price !== undefined) return { price, currency: firstString(node.currencyCode, node.currency) };
   }
   return {};
 }
@@ -143,9 +185,16 @@ function walkEmbeddedJson(
   if (!isObject(value) || seen.has(value)) return;
   seen.add(value);
 
-  const name = firstString(value.name, value.displayName, value.title);
+  const name = firstString(
+    value.name,
+    value.displayName,
+    value.display_name,
+    value.itemName,
+    value.productName,
+    value.title,
+  );
   const price = embeddedPrice(value);
-  const looksLikeItem = name && price.price !== undefined && !/subtotal|delivery fee|service fee|tax|total/i.test(name);
+  const looksLikeItem = name && price.price !== undefined && !/subtotal|delivery fee|service fee|tax|total|minimum order/i.test(name);
 
   if (looksLikeItem) {
     const item = makeMenuItem({
@@ -263,17 +312,29 @@ export function extractMenuFromHtml(
 }
 
 export function extractMenuFromJsonPayloads(
-  payloads: unknown[],
+  payloads: Array<unknown | CapturedJsonPayload>,
   source: OrderingSource,
+  adapterId?: MenuAdapterId,
 ): HtmlMenuExtraction {
   const items: MenuItem[] = [];
   for (const payload of payloads) {
-    walkEmbeddedJson(payload, source.id, items, new WeakSet<object>());
+    const data = isObject(payload) && "data" in payload && "url" in payload
+      ? payload.data
+      : payload;
+    walkEmbeddedJson(data, source.id, items, new WeakSet<object>());
     if (items.length >= 750) break;
   }
+
+  const providerFilteredItems = adapterId
+    ? items.filter((item) => {
+        if (/^(?:add|choose|select|remove|no |extra )/i.test(item.name)) return false;
+        if (/utensils?|napkins?|cutlery|special instructions?/i.test(item.name)) return false;
+        return true;
+      })
+    : items;
   return {
-    items: dedupeItems(items).slice(0, 750),
-    methods: items.length > 0
+    items: dedupeItems(providerFilteredItems).slice(0, 750),
+    methods: providerFilteredItems.length > 0
       ? new Set(["embedded_json"] as const)
       : new Set<"json_ld" | "embedded_json" | "dom">(),
   };

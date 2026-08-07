@@ -5,6 +5,10 @@ import {
   type HtmlMenuExtraction,
 } from "@/lib/menu/html";
 import { menuAdapterForUrl } from "@/lib/menu/adapters";
+import {
+  extractProviderMenuFromHtml,
+  extractProviderMenuFromJson,
+} from "@/lib/menu/provider-parsers";
 import { fetchPublicHtml } from "@/lib/menu/security";
 import type {
   ExtractedMenu,
@@ -39,8 +43,12 @@ function mergeExtractions(
   return { items: [...itemsByIdentity.values()].slice(0, 750), methods };
 }
 
-export async function extractMenuFromSource(source: OrderingSource): Promise<ExtractedMenu> {
+export async function extractMenuFromSource(
+  source: OrderingSource,
+  context: { restaurantAddress?: string } = {},
+): Promise<ExtractedMenu> {
   const warnings: string[] = [];
+  const directFetchWarnings: string[] = [];
   const adapter = menuAdapterForUrl(source.url);
   if (!adapter) {
     return {
@@ -57,22 +65,66 @@ export async function extractMenuFromSource(source: OrderingSource): Promise<Ext
   try {
     ({ html } = await fetchPublicHtml(source.url));
   } catch (error) {
-    warnings.push(error instanceof Error ? error.message : "Direct page fetch failed.");
+    directFetchWarnings.push(error instanceof Error ? error.message : "Direct page fetch failed.");
   }
 
-  let extraction = extractMenuFromHtml(html, source);
+  const directProviderExtraction = extractProviderMenuFromHtml(
+    html,
+    source,
+    adapter.id,
+  );
+  let extraction = directProviderExtraction.items.length >= 3
+    ? directProviderExtraction
+    : extractMenuFromHtml(html, source);
 
   if (
     isBrowserConfigured() &&
     (extraction.items.length === 0 || adapter.captureNetworkJson)
   ) {
     try {
-      const rendered = await renderPublicPage(source.url);
-      extraction = mergeExtractions([
-        extraction,
-        extractMenuFromHtml(rendered.html, source),
-        extractMenuFromJsonPayloads(rendered.jsonPayloads, source),
-      ]);
+      const rendered = await renderPublicPage(source.url, {
+        adapterId: adapter.id,
+        restaurantAddress: context.restaurantAddress,
+      });
+      const providerJsonExtraction = extractProviderMenuFromJson(
+        rendered.jsonPayloads,
+        source,
+        adapter.id,
+      );
+      const renderedProviderExtraction = extractProviderMenuFromHtml(
+        rendered.html,
+        source,
+        adapter.id,
+      );
+      const renderedHtmlExtraction = renderedProviderExtraction.items.length >= 3
+        ? renderedProviderExtraction
+        : extractMenuFromHtml(rendered.html, source);
+      extraction = providerJsonExtraction.items.length >= 3
+        ? providerJsonExtraction
+        : mergeExtractions([
+            extraction,
+            renderedHtmlExtraction,
+            extractMenuFromJsonPayloads(rendered.jsonPayloads, source, adapter.id),
+          ]);
+      if (rendered.diagnostics.navigationStatus && rendered.diagnostics.navigationStatus >= 400) {
+        warnings.push(`Browser navigation returned HTTP ${rendered.diagnostics.navigationStatus}.`);
+      }
+      if (rendered.diagnostics.blockedResponseCount > 0) {
+        warnings.push(
+          `${rendered.diagnostics.blockedResponseCount} provider response${rendered.diagnostics.blockedResponseCount === 1 ? " was" : "s were"} blocked (HTTP 401/403/429)${rendered.diagnostics.blockedResponseEndpoints.length > 0 ? `: ${rendered.diagnostics.blockedResponseEndpoints.slice(0, 3).join(", ")}` : ""}.`,
+        );
+      }
+      if (
+        rendered.diagnostics.locationSelectionAttempted &&
+        !rendered.diagnostics.locationSelectionSucceeded
+      ) {
+        warnings.push("A location prompt was found, but the restaurant location could not be selected automatically.");
+      }
+      if (rendered.diagnostics.capturedJsonResponseCount > 0 && extraction.items.length === 0) {
+        warnings.push(
+          `${rendered.diagnostics.capturedJsonResponseCount} menu-like JSON response${rendered.diagnostics.capturedJsonResponseCount === 1 ? " was" : "s were"} captured, but this provider schema is not recognized yet${rendered.diagnostics.capturedJsonEndpoints.length > 0 ? `: ${rendered.diagnostics.capturedJsonEndpoints.slice(0, 3).join(", ")}` : ""}.`,
+        );
+      }
     } catch (error) {
       warnings.push(
         error instanceof Error ? `Rendered-page extraction failed: ${error.message}` : "Rendered-page extraction failed.",
@@ -88,7 +140,10 @@ export async function extractMenuFromSource(source: OrderingSource): Promise<Ext
     );
   }
 
-  if (extraction.items.length === 0) warnings.push("No menu items were recognized on this source.");
+  if (extraction.items.length === 0) {
+    warnings.push(...directFetchWarnings);
+    warnings.push("No menu items were recognized on this source.");
+  }
 
   return {
     source,
@@ -135,6 +190,7 @@ function summarizePrices(items: MenuItem[]): RestaurantMenuResult["priceSummary"
 export async function extractRestaurantMenus(input: {
   placeId: string;
   restaurantName?: string;
+  restaurantAddress?: string;
   sources: OrderingSource[];
 }): Promise<RestaurantMenuResult> {
   const menus: ExtractedMenu[] = [];
@@ -143,7 +199,9 @@ export async function extractRestaurantMenus(input: {
   // Discovery has already selected the first top-to-bottom provider with a
   // registered scraper adapter. Never fall through to a second source here.
   if (primarySource) {
-    menus.push(await extractMenuFromSource(primarySource));
+    menus.push(await extractMenuFromSource(primarySource, {
+      restaurantAddress: input.restaurantAddress,
+    }));
   }
 
   const items = menus.flatMap((menu) => menu.items);

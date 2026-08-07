@@ -1,10 +1,21 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  providerStartUrl,
   scoreGoogleOrderControlLabel,
   selectFirstSupportedOrderingLink,
   selectGoogleOrderingLinkCandidates,
 } from "@/lib/menu/browser";
+
+test("starts Panda location discovery on the restaurant city page", () => {
+  assert.equal(
+    providerStartUrl("https://www.pandaexpress.com/locations", {
+      adapterId: "panda_express",
+      restaurantAddress: "2190 Barranca Pkwy, Irvine, CA 92606, USA",
+    }),
+    "https://www.pandaexpress.com/locations/ca/irvine/",
+  );
+});
 
 test("recognizes the Chinese online-order control but rejects sponsored order ads", () => {
   assert.equal(scoreGoogleOrderControlLabel("在线订餐"), 100);
