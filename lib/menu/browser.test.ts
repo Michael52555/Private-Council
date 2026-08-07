@@ -1,6 +1,14 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { selectGoogleOrderingLinkCandidates } from "@/lib/menu/browser";
+import {
+  scoreGoogleOrderControlLabel,
+  selectGoogleOrderingLinkCandidates,
+} from "@/lib/menu/browser";
+
+test("recognizes the Chinese online-order control but rejects sponsored order ads", () => {
+  assert.equal(scoreGoogleOrderControlLabel("在线订餐"), 100);
+  assert.equal(scoreGoogleOrderControlLabel("立即订餐 · 广告主: GrubHub, Inc."), -1);
+});
 
 test("keeps custom provider links when they are scoped to the Google ordering dialog", () => {
   const links = selectGoogleOrderingLinkCandidates(
@@ -59,6 +67,10 @@ test("rejects Google short links and anti-bot infrastructure as ordering provide
       {
         href: "https://geo.captcha-delivery.com/captcha/?initialCid=example",
         text: "Document navigation",
+      },
+      {
+        href: "https://i.liadm.com/pixel?redirect=example",
+        text: "Tracking navigation",
       },
       { href: "https://www.pandaexpress.com/location/123", text: "Panda Express" },
     ],

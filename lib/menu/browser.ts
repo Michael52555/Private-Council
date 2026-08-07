@@ -136,7 +136,9 @@ function isOrderingInfrastructureHost(hostname: string): boolean {
     host === "recaptcha.net" ||
     host.endsWith(".recaptcha.net") ||
     host === "captcha-delivery.com" ||
-    host.endsWith(".captcha-delivery.com")
+    host.endsWith(".captcha-delivery.com") ||
+    host === "liadm.com" ||
+    host.endsWith(".liadm.com")
   );
 }
 
@@ -170,8 +172,13 @@ function controlLabel(element: Element): string {
     .trim();
 }
 
-function orderControlScore(label: string): number {
-  if (!label || /order history|your orders|reorder|pre-?order|directions/i.test(label)) {
+export function scoreGoogleOrderControlLabel(label: string): number {
+  if (
+    !label ||
+    /order history|your orders|reorder|pre-?order|directions|sponsored|广告|立即订餐/i.test(
+      label,
+    )
+  ) {
     return -1;
   }
   if (exactOrderControlText.test(label)) return 100;
@@ -186,16 +193,47 @@ async function findOrderControl(page: Page): Promise<{
 }> {
   let best: { locator: Locator; label: string; score: number } | undefined;
 
+  const consider = async (locator: Locator) => {
+    if (!(await locator.isVisible().catch(() => false))) return;
+    const label = await locator.evaluate(controlLabel).catch(() => "");
+    const score = scoreGoogleOrderControlLabel(label);
+    if (score > (best?.score ?? -1)) best = { locator, label, score };
+  };
+
   for (const frame of page.frames()) {
-    const controls = frame.locator(
-      'button:visible, a:visible, [role="button"]:visible, [role="link"]:visible',
+    const textMatches = frame.getByText(broadOrderControlText);
+    const textMatchCount = Math.min(
+      await textMatches.count().catch(() => 0),
+      30,
     );
-    const count = Math.min(await controls.count().catch(() => 0), 300);
-    for (let index = 0; index < count; index += 1) {
-      const locator = controls.nth(index);
-      const label = await locator.evaluate(controlLabel).catch(() => "");
-      const score = orderControlScore(label);
-      if (score > (best?.score ?? -1)) best = { locator, label, score };
+    for (let index = 0; index < textMatchCount; index += 1) {
+      const textMatch = textMatches.nth(index);
+      const clickable = textMatch
+        .locator(
+          "xpath=ancestor-or-self::*[self::button or self::a or @role='button' or @role='link' or @jsaction or @tabindex][1]",
+        )
+        .first();
+      await consider(clickable);
+    }
+
+    const controls = frame.locator(
+      'button:visible, a:visible, [role="button"]:visible, [role="link"]:visible, [jsaction]:visible, [tabindex]:visible',
+    );
+    const labels = await controls
+      .evaluateAll((elements) =>
+        elements.slice(0, 800).map((element) =>
+          `${element.getAttribute("aria-label") ?? ""} ${element.textContent ?? ""}`
+            .replace(/\s+/g, " ")
+            .trim(),
+        ),
+      )
+      .catch(() => [] as string[]);
+    for (let index = 0; index < labels.length; index += 1) {
+      const label = labels[index];
+      const score = scoreGoogleOrderControlLabel(label);
+      if (score > (best?.score ?? -1)) {
+        best = { locator: controls.nth(index), label, score };
+      }
     }
   }
 
@@ -206,7 +244,9 @@ async function collectVisibleControlLabels(page: Page): Promise<string[]> {
   const labels: string[] = [];
   for (const frame of page.frames()) {
     const frameLabels = await frame
-      .locator('button:visible, a:visible, [role="button"]:visible, [role="link"]:visible')
+      .locator(
+        'button:visible, a:visible, [role="button"]:visible, [role="link"]:visible, [jsaction]:visible, [tabindex]:visible',
+      )
       .evaluateAll((controls) =>
         controls
           .map((control) =>
@@ -440,6 +480,7 @@ export async function discoverGoogleOrderingLinks(
     context.on("page", recordNavigation);
     context.on("request", (request) => {
       if (!request.isNavigationRequest() || request.resourceType() !== "document") return;
+      if (request.frame().parentFrame()) return;
       recordExternalNavigation(
         request.url(),
         "Document navigation from the Google Maps ordering control",
@@ -458,6 +499,15 @@ export async function discoverGoogleOrderingLinks(
 
     const finalGoogleMapsUrl = page.url();
     const pageTitle = await page.title().catch(() => "");
+    let orderControlLayout: "desktop" | "mobile" = "desktop";
+    let orderControlMatch = await findOrderControl(page);
+    if (!orderControlMatch.locator) {
+      await page.setViewportSize({ width: 640, height: 1200 });
+      await page.waitForTimeout(1_500);
+      orderControlLayout = "mobile";
+      orderControlMatch = await findOrderControl(page);
+    }
+
     const visibleControlLabels = await collectVisibleControlLabels(page);
     const baselineLinks = await collectPageLinks(page);
     const baselineHrefs = new Set(
@@ -466,13 +516,14 @@ export async function discoverGoogleOrderingLinks(
         .filter((href): href is string => Boolean(href)),
     );
 
-    const orderControlMatch = await findOrderControl(page);
     const orderControl = orderControlMatch.locator;
     const orderControlLabel = orderControlMatch.label;
     const orderControlFound = Boolean(orderControl);
 
     if (!orderControlFound || !orderControl) {
-      warnings.push("Google Maps did not expose a visible Online ordering control for this place.");
+      warnings.push(
+        "Google Maps did not expose a detectable Online ordering control in desktop or mobile layout for this place.",
+      );
       return {
         sources: [],
         warnings,
@@ -588,6 +639,7 @@ export async function discoverGoogleOrderingLinks(
         browserConfigured: true,
         orderControlFound: true,
         ...(orderControlLabel ? { orderControlLabel } : {}),
+        orderControlLayout,
         finalGoogleMapsUrl,
         ...(pageTitle ? { pageTitle } : {}),
         consentHandled,

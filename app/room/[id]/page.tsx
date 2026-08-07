@@ -2059,6 +2059,9 @@ export default function RoomPage() {
                                           <div className="mt-3 border-t border-white/10 pt-3 text-[10px] leading-4 text-gray-500">
                                             <p>
                                               Online ordering control: {candidateOrdering[candidate.id].diagnostics?.orderControlFound ? "found" : "not found"}
+                                              {candidateOrdering[candidate.id].diagnostics?.orderControlLayout
+                                                ? ` · ${candidateOrdering[candidate.id].diagnostics?.orderControlLayout} layout`
+                                                : ""}
                                             </p>
                                             <p>
                                               Result scope: {candidateOrdering[candidate.id].diagnostics?.resultScope}
