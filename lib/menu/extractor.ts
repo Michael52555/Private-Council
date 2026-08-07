@@ -98,23 +98,12 @@ export async function extractRestaurantMenus(input: {
   sources: OrderingSource[];
 }): Promise<RestaurantMenuResult> {
   const menus: ExtractedMenu[] = [];
+  const primarySource = input.sources[0];
 
-  // Keep browser-heavy providers sequential so one request does not fan out into
-  // several Chromium sessions at once.
-  for (const source of input.sources.slice(0, 5)) {
-    const menu = await extractMenuFromSource(source);
-    menus.push(menu);
-
-    const pricedItemCount = menu.items.filter(
-      (item) => typeof item.price === "number",
-    ).length;
-
-    // One reliable ordering source is enough to price this restaurant. Keep
-    // the remaining discovered URLs as sources, but avoid rendering redundant
-    // provider copies of the same menu.
-    if (pricedItemCount >= 3) {
-      break;
-    }
+  // Google Maps lets a restaurant place its preferred ordering link first.
+  // Respect that order and never fall through to lower-ranked providers.
+  if (primarySource) {
+    menus.push(await extractMenuFromSource(primarySource));
   }
 
   const items = menus.flatMap((menu) => menu.items);

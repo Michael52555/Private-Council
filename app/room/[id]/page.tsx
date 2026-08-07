@@ -14,7 +14,16 @@ import type {
 import type {
   OrderingDiscoveryDiagnostics,
   OrderingSource,
+  MenuItem,
+  RestaurantMenuResult,
 } from "@/lib/menu/types";
+import {
+  orderingSourceHostname,
+  orderingSourceInventoryLabel,
+  summarizeProviderSurvey,
+  upsertProviderSurveyObservation,
+  type ProviderSurveyObservation,
+} from "@/lib/menu/survey";
 
 import {
   evaluateRestaurantScore,
@@ -119,19 +128,14 @@ type CandidateOrderingState = {
   error?: string;
 };
 
-function sourceHostname(source: OrderingSource): string {
-  try {
-    return new URL(source.url).hostname.replace(/^www\./, "");
-  } catch {
-    return source.label;
-  }
-}
+type RestaurantMenuApiResponse = RestaurantMenuResult | { error: string };
 
-function sourceInventoryLabel(source: OrderingSource): string {
-  return source.provider === "restaurant_website" || source.provider === "unknown"
-    ? sourceHostname(source)
-    : source.label;
-}
+type CandidateMenuState =
+  | { status: "loading" }
+  | { status: "success"; result: RestaurantMenuResult }
+  | { status: "error"; error: string };
+
+const providerSurveyStorageKey = "glued:restaurant-provider-survey:v1";
 
 type DistanceEvaluation =
   | {
@@ -307,6 +311,62 @@ function PlanningBackground() {
   );
 }
 
+function PrimaryMenuPanel({ state }: { state?: CandidateMenuState }) {
+  if (!state || state.status === "loading") return null;
+  if (state.status === "error") {
+    return (
+      <p className="mt-3 rounded-xl border border-red-400/15 bg-red-500/10 p-3 text-xs leading-5 text-red-200">
+        Primary menu scrape failed: {state.error}
+      </p>
+    );
+  }
+
+  const pricedItems = state.result.items.filter(
+    (item): item is MenuItem & { price: number } =>
+      typeof item.price === "number",
+  );
+  const menu = state.result.menus[0];
+  return (
+    <div className="mt-3 rounded-xl border border-emerald-300/15 bg-emerald-500/5 p-3 text-xs">
+      <div className="flex items-center justify-between gap-3">
+        <span className="font-semibold text-emerald-200">
+          Primary provider menu
+        </span>
+        <span className="text-gray-400">
+          {state.result.items.length} items · {pricedItems.length} priced
+        </span>
+      </div>
+      <p className="mt-2 text-[10px] text-gray-500">
+        Extraction: {menu?.extractionMethod ?? "none"}
+      </p>
+      {pricedItems.length >= 3 && (
+        <p className="mt-2 text-emerald-100">
+          Typical item quartiles: ${state.result.priceSummary.lowerQuartile?.toFixed(2)}–$
+          {state.result.priceSummary.upperQuartile?.toFixed(2)} · median $
+          {state.result.priceSummary.median?.toFixed(2)}
+        </p>
+      )}
+      {pricedItems.length > 0 && (
+        <ul className="mt-3 space-y-1 text-gray-300">
+          {pricedItems.slice(0, 8).map((item) => (
+            <li key={item.id} className="flex justify-between gap-3">
+              <span className="truncate">{item.name}</span>
+              <span className="shrink-0">${item.price.toFixed(2)}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+      {(menu?.warnings.length ?? 0) > 0 && (
+        <ul className="mt-3 space-y-1 border-t border-white/10 pt-3 text-[10px] leading-4 text-amber-200/80">
+          {menu?.warnings.map((warning, index) => (
+            <li key={`${index}-${warning}`}>• {warning}</li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 function renderPreferenceDetails(preference: Preference) {
 
   console.log(
@@ -386,6 +446,13 @@ export default function RoomPage() {
   const [candidateOrdering, setCandidateOrdering] = useState<
     Record<string, CandidateOrderingState>
   >({});
+  const [candidateMenus, setCandidateMenus] = useState<
+    Record<string, CandidateMenuState>
+  >({});
+  const [providerSurvey, setProviderSurvey] = useState<
+    ProviderSurveyObservation[]
+  >([]);
+  const [providerSurveyLoaded, setProviderSurveyLoaded] = useState(false);
 
   const orderingDiscoveryRunRef = useRef(0);
 
@@ -488,6 +555,44 @@ export default function RoomPage() {
     setSaveStatus("saved");
   }, [storageKey]);
 
+  useEffect(() => {
+    try {
+      const savedSurvey = window.localStorage.getItem(providerSurveyStorageKey);
+      if (savedSurvey) {
+        const parsed = JSON.parse(savedSurvey) as unknown;
+        if (Array.isArray(parsed)) {
+          setProviderSurvey(
+            parsed.filter((entry): entry is ProviderSurveyObservation => {
+              if (typeof entry !== "object" || entry === null) return false;
+              const observation = entry as Partial<ProviderSurveyObservation>;
+              return (
+                typeof observation.placeId === "string" &&
+                typeof observation.restaurantName === "string" &&
+                typeof observation.address === "string" &&
+                typeof observation.observedAt === "string" &&
+                (observation.primarySource === null ||
+                  (typeof observation.primarySource === "object" &&
+                    typeof observation.primarySource.url === "string"))
+              );
+            }),
+          );
+        }
+      }
+    } catch (error) {
+      console.error("Could not load provider survey:", error);
+    } finally {
+      setProviderSurveyLoaded(true);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!providerSurveyLoaded) return;
+    window.localStorage.setItem(
+      providerSurveyStorageKey,
+      JSON.stringify(providerSurvey),
+    );
+  }, [providerSurvey, providerSurveyLoaded]);
+
   
 
   // Automatically save changes after a short delay.
@@ -544,6 +649,7 @@ export default function RoomPage() {
     orderingDiscoveryRunRef.current = enrichmentRun;
     setIsGeneratingCandidates(true);
     setCandidateGenerationError("");
+    setCandidateMenus({});
 
     try {
         const response = await fetch(
@@ -658,6 +764,16 @@ export default function RoomPage() {
         },
       }));
 
+      setProviderSurvey((current) =>
+        upsertProviderSurveyObservation(current, {
+          placeId: candidate.id,
+          restaurantName: candidate.name,
+          address: candidate.address,
+          primarySource: discovery.sources[0] ?? null,
+          observedAt: new Date().toISOString(),
+        }),
+      );
+
       setCandidates((current) =>
         current.map((entry) =>
           entry.id === candidate.id
@@ -732,6 +848,78 @@ export default function RoomPage() {
     }
 
     await Promise.all([worker(), worker()]);
+  }
+
+  async function handleExtractPrimaryMenu(candidate: RestaurantCandidate) {
+    const primarySource = candidate.orderingSources[0];
+    if (!primarySource) return;
+
+    setCandidateMenus((current) => ({
+      ...current,
+      [candidate.id]: { status: "loading" },
+    }));
+
+    try {
+      const response = await fetch("/api/restaurants/menu", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          placeId: candidate.id,
+          restaurantName: candidate.name,
+          sources: [primarySource],
+        }),
+      });
+      const data = (await response.json()) as RestaurantMenuApiResponse;
+      if (!response.ok || "error" in data) {
+        throw new Error(
+          "error" in data ? data.error : "Could not extract the primary menu.",
+        );
+      }
+
+      setCandidateMenus((current) => ({
+        ...current,
+        [candidate.id]: { status: "success", result: data },
+      }));
+
+      const pricedItemCount = data.items.filter(
+        (item) => typeof item.price === "number",
+      ).length;
+      const hasReliablePriceSample = pricedItemCount >= 3;
+      setCandidates((current) =>
+        current.map((entry) =>
+          entry.id === candidate.id
+            ? {
+                ...entry,
+                estimatedPriceMin: hasReliablePriceSample
+                  ? data.priceSummary.lowerQuartile ?? data.priceSummary.minimum
+                  : null,
+                estimatedPriceMax: hasReliablePriceSample
+                  ? data.priceSummary.upperQuartile ?? data.priceSummary.maximum
+                  : null,
+                pricePerPerson: hasReliablePriceSample
+                  ? data.priceSummary.median
+                  : null,
+                menuItemCount: data.items.length,
+              }
+            : entry,
+        ),
+      );
+    } catch (error) {
+      setCandidateMenus((current) => ({
+        ...current,
+        [candidate.id]: {
+          status: "error",
+          error:
+            error instanceof Error
+              ? error.message
+              : "Could not extract the primary menu.",
+        },
+      }));
+    }
+  }
+
+  function handleClearProviderSurvey() {
+    setProviderSurvey([]);
   }
 
   function updateDraft<K extends keyof PreferenceDraft>(
@@ -1219,26 +1407,8 @@ export default function RoomPage() {
       candidate.menuStatus === "unavailable",
   ).length;
 
-  const providerRestaurantCounts = new Map<string, number>();
-  for (const state of Object.values(candidateOrdering)) {
-    if (state.status !== "success") continue;
-    const labelsForRestaurant = new Set(
-      state.sources.map(sourceInventoryLabel),
-    );
-    for (const label of labelsForRestaurant) {
-      providerRestaurantCounts.set(
-        label,
-        (providerRestaurantCounts.get(label) ?? 0) + 1,
-      );
-    }
-  }
-  const providerInventory = [...providerRestaurantCounts.entries()]
-    .map(([label, restaurantCount]) => ({ label, restaurantCount }))
-    .sort(
-      (left, right) =>
-        right.restaurantCount - left.restaurantCount ||
-        left.label.localeCompare(right.label),
-    );
+  const providerSurveySummary = summarizeProviderSurvey(providerSurvey);
+  const providerInventory = providerSurveySummary.providers;
 
 
   if (!hasLoaded) {
@@ -1672,13 +1842,27 @@ export default function RoomPage() {
                             
                             </div>
 
-                            {providerInventory.length > 0 && (
+                            {providerSurveySummary.checkedRestaurantCount > 0 && (
                               <div className="mt-5 rounded-2xl border border-purple-300/15 bg-purple-500/10 p-4">
-                                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-purple-200">
-                                  Provider inventory
-                                </p>
-                                <p className="mt-1 text-xs leading-5 text-gray-400">
-                                  Counts show how many restaurant listings exposed each provider through Google Maps.
+                                <div className="flex items-start justify-between gap-4">
+                                  <div>
+                                    <p className="text-xs font-semibold uppercase tracking-[0.18em] text-purple-200">
+                                      Primary provider survey
+                                    </p>
+                                    <p className="mt-1 text-xs leading-5 text-gray-400">
+                                      Each restaurant contributes only its first valid Google Maps ordering provider. Results persist across searches on this device.
+                                    </p>
+                                  </div>
+                                  <button
+                                    type="button"
+                                    onClick={handleClearProviderSurvey}
+                                    className="shrink-0 rounded-lg border border-white/10 px-2 py-1 text-[10px] text-gray-400 transition hover:bg-white/10 hover:text-gray-200"
+                                  >
+                                    Clear survey
+                                  </button>
+                                </div>
+                                <p className="mt-3 text-xs text-gray-300">
+                                  {providerSurveySummary.checkedRestaurantCount} restaurants checked · {providerSurveySummary.restaurantWithSourceCount} resolved · {providerSurveySummary.coveragePercent}% source coverage
                                 </p>
                                 <div className="mt-3 flex flex-wrap gap-2">
                                   {providerInventory.map((provider) => (
@@ -1686,7 +1870,7 @@ export default function RoomPage() {
                                       key={provider.label}
                                       className="rounded-full border border-white/10 bg-black/20 px-3 py-1 text-xs text-gray-200"
                                     >
-                                      {provider.label} · {provider.restaurantCount}
+                                      {provider.label} · {provider.restaurantCount} · {provider.shareOfResolvedPercent}%
                                     </span>
                                   ))}
                                 </div>
@@ -1736,7 +1920,7 @@ export default function RoomPage() {
 
                                         <p className="mt-1 text-sm text-gray-400">
                                           {candidate.menuStatus === "loaded"
-                                            ? `${candidate.orderingSources.length} Google ordering source${candidate.orderingSources.length === 1 ? "" : "s"}`
+                                            ? "Primary Google ordering source found"
                                             : candidate.menuStatus === "unavailable"
                                               ? "No Google ordering source found"
                                               : candidate.menuStatus === "loading"
@@ -1782,6 +1966,21 @@ export default function RoomPage() {
                                           Google Maps ↗
                                         </a>
                                       )}
+
+                                      {candidate.orderingSources[0] && (
+                                        <button
+                                          type="button"
+                                          onClick={() => handleExtractPrimaryMenu(candidate)}
+                                          disabled={candidateMenus[candidate.id]?.status === "loading"}
+                                          className="rounded-xl border border-emerald-300/20 bg-emerald-500/10 px-3 py-2 text-xs font-semibold text-emerald-100 transition hover:bg-emerald-500/20 disabled:cursor-wait disabled:opacity-60"
+                                        >
+                                          {candidateMenus[candidate.id]?.status === "loading"
+                                            ? "Scraping primary menu..."
+                                            : candidateMenus[candidate.id]?.status === "success"
+                                              ? "Refresh primary menu"
+                                              : "Scrape primary menu"}
+                                        </button>
+                                      )}
                                     </div>
 
                                     {candidateOrdering[candidate.id]?.status === "error" && (
@@ -1794,10 +1993,10 @@ export default function RoomPage() {
                                       <div className="mt-4 rounded-xl border border-white/10 bg-black/20 p-3">
                                         <div className="flex items-center justify-between gap-3 text-xs">
                                           <span className="font-semibold text-emerald-200">
-                                            Google Maps ordering sources
+                                            Google Maps primary ordering source
                                           </span>
                                           <span className="text-gray-400">
-                                            {candidateOrdering[candidate.id].sources.length} found
+                                            {candidateOrdering[candidate.id].sources.length > 0 ? "top-listed provider" : "not found"}
                                           </span>
                                         </div>
 
@@ -1807,7 +2006,7 @@ export default function RoomPage() {
                                               <li key={source.id} className="rounded-lg border border-white/10 bg-white/5 p-3">
                                                 <div className="flex items-start justify-between gap-2">
                                                   <span className="font-semibold text-white">
-                                                    {sourceInventoryLabel(source)}
+                                                    {orderingSourceInventoryLabel(source)}
                                                   </span>
                                                   <span className="shrink-0 text-[10px] uppercase tracking-wide text-gray-500">
                                                     {source.fulfillment}
@@ -1819,7 +2018,7 @@ export default function RoomPage() {
                                                   rel="noreferrer"
                                                   className="mt-2 block break-all text-purple-300 underline decoration-purple-300/30 underline-offset-2"
                                                 >
-                                                  {sourceHostname(source)} ↗
+                                                  {orderingSourceHostname(source)} ↗
                                                 </a>
                                                 <p className="mt-1 break-all text-[10px] leading-4 text-gray-500">
                                                   {source.url}
@@ -1850,7 +2049,7 @@ export default function RoomPage() {
                                                 rel="noreferrer"
                                                 className="mt-1 block break-all text-gray-500 underline decoration-white/10 underline-offset-2"
                                               >
-                                                {sourceHostname(source)} ↗
+                                                {orderingSourceHostname(source)} ↗
                                               </a>
                                             ))}
                                           </div>
@@ -1895,6 +2094,8 @@ export default function RoomPage() {
                                         )}
                                       </div>
                                     )}
+
+                                    <PrimaryMenuPanel state={candidateMenus[candidate.id]} />
 
                                     <div className="mt-5">
                                       <span

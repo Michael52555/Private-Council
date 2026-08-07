@@ -148,7 +148,6 @@ type LinkCandidate = {
 type ClickableCandidate = {
   locator: Locator;
   label: string;
-  score: number;
 };
 
 export type GoogleOrderingDiscoveryResult = {
@@ -263,17 +262,12 @@ async function findProviderControls(
       const label = await locator.evaluate(controlLabel).catch(() => "");
       if (baselineLabels.has(label)) continue;
       const score = providerControlScore(label);
-      if (score >= 0) candidates.push({ locator, label, score });
+      if (score >= 0) candidates.push({ locator, label });
     }
   }
 
   const seen = new Set<string>();
   return candidates
-    .sort(
-      (left, right) =>
-        right.score - left.score ||
-        left.label.length - right.label.length,
-    )
     .filter((candidate) => {
       const key = candidate.label.toLowerCase();
       if (seen.has(key)) return false;
@@ -513,30 +507,33 @@ export async function discoverGoogleOrderingLinks(
       baselineHrefs,
       withinDialog: dialogVisible,
     });
+    const primarySelectedLink = selectedLinks[0];
 
-    for (const candidate of selectedLinks) {
+    if (primarySelectedLink) {
       sources.push(
         sourceFromCandidate(
-          candidate,
+          primarySelectedLink,
           dialogVisible ? "google_maps_dialog" : "google_maps_new_link",
         ),
       );
     }
 
     const providerControls =
-      selectedLinks.length === 0 && navigationCandidates.length === 0
+      !primarySelectedLink && navigationCandidates.length === 0
         ? await findProviderControls(page, new Set(visibleControlLabels))
         : [];
+    const primaryProviderControl = providerControls[0];
 
-    for (const candidate of providerControls) {
-      const navigationCountBeforeClick = navigationCandidates.length;
-      await candidate.locator.click({ timeout: 5_000 }).catch(() => undefined);
+    if (primaryProviderControl) {
+      await primaryProviderControl.locator.click({ timeout: 5_000 }).catch(() => undefined);
       await page.waitForTimeout(2_500);
-      if (navigationCandidates.length > navigationCountBeforeClick) break;
     }
 
-    for (const candidate of navigationCandidates) {
-      sources.push(sourceFromCandidate(candidate, "google_maps_navigation"));
+    const finalNavigationCandidate = navigationCandidates.at(-1);
+    if (!primarySelectedLink && finalNavigationCandidate) {
+      sources.push(
+        sourceFromCandidate(finalNavigationCandidate, "google_maps_navigation"),
+      );
     }
 
     const dialogControlLabels = dialogVisible
@@ -566,7 +563,7 @@ export async function discoverGoogleOrderingLinks(
       ]),
     ].slice(0, 20);
 
-    const dedupedSources = dedupeSources(sources);
+    const dedupedSources = dedupeSources(sources).slice(0, 1);
     if (dedupedSources.length === 0) {
       warnings.push(
         dialogVisible

@@ -178,13 +178,20 @@ function domText($element: cheerio.Cheerio<AnyNode>, selectors: string[]): strin
 }
 
 function dedupeItems(items: MenuItem[]): MenuItem[] {
-  const seen = new Set<string>();
-  return items.filter((item) => {
-    const key = `${item.sourceId}|${item.section ?? ""}|${item.name}|${item.price ?? ""}`.toLowerCase();
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
+  const byIdentity = new Map<string, MenuItem>();
+  for (const item of items) {
+    const key = `${item.sourceId}|${item.name}|${item.price ?? ""}`.toLowerCase();
+    const existing = byIdentity.get(key);
+    if (!existing) {
+      byIdentity.set(key, item);
+      continue;
+    }
+
+    const existingDetail = Number(Boolean(existing.section)) + Number(Boolean(existing.description));
+    const nextDetail = Number(Boolean(item.section)) + Number(Boolean(item.description));
+    if (nextDetail > existingDetail) byIdentity.set(key, item);
+  }
+  return [...byIdentity.values()];
 }
 
 export function extractMenuFromHtml(

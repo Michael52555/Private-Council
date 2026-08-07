@@ -61,6 +61,26 @@ test("extracts embedded provider JSON and converts cents", () => {
   assert(result.methods.has("embedded_json"));
 });
 
+test("deduplicates repeated copies of the same item across embedded sections", () => {
+  const source = makeOrderingSource({
+    url: "https://www.doordash.com/store/example-123",
+    discoveredFrom: "google_maps",
+  });
+  const html = `
+    <script id="__NEXT_DATA__" type="application/json">
+      {"menu":{"categories":[
+        {"name":"Popular","items":[{"name":"Chicken bowl","price":1299}]},
+        {"name":"Bowls","items":[{"name":"Chicken bowl","price":1299}]}
+      ]}}
+    </script>
+  `;
+
+  const result = extractMenuFromHtml(html, source);
+  assert.equal(result.items.length, 1);
+  assert.equal(result.items[0].name, "Chicken bowl");
+  assert.equal(result.items[0].price, 12.99);
+});
+
 test("discovers both known providers and custom order links", () => {
   const sources = discoverOrderLinksFromHtml(
     `
