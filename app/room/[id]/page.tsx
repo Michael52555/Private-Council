@@ -325,12 +325,24 @@ function PrimaryMenuPanel({ state }: { state?: CandidateMenuState }) {
     (item): item is MenuItem & { price: number } =>
       typeof item.price === "number",
   );
-  const menu = state.result.menus[0];
+  const effectiveMenuIndex = state.result.menus.findIndex(
+    (candidateMenu) => candidateMenu.items.filter(
+      (item) => typeof item.price === "number",
+    ).length >= 3,
+  );
+  const menu = effectiveMenuIndex >= 0
+    ? state.result.menus[effectiveMenuIndex]
+    : state.result.menus.at(-1);
+  const menuWarnings = state.result.menus.flatMap((candidateMenu) =>
+    candidateMenu.warnings.map((warning) =>
+      `${orderingSourceHostname(candidateMenu.source)}: ${warning}`,
+    ),
+  );
   return (
     <div className="mt-3 rounded-xl border border-emerald-300/15 bg-emerald-500/5 p-3 text-xs">
       <div className="flex items-center justify-between gap-3">
         <span className="font-semibold text-emerald-200">
-          Primary provider menu
+          {effectiveMenuIndex > 0 ? "Fallback provider menu" : "Primary provider menu"}
         </span>
         <span className="text-gray-400">
           {state.result.items.length} items · {pricedItems.length} priced
@@ -356,9 +368,9 @@ function PrimaryMenuPanel({ state }: { state?: CandidateMenuState }) {
           ))}
         </ul>
       )}
-      {(menu?.warnings.length ?? 0) > 0 && (
+      {menuWarnings.length > 0 && (
         <ul className="mt-3 space-y-1 border-t border-white/10 pt-3 text-[10px] leading-4 text-amber-200/80">
-          {menu?.warnings.map((warning, index) => (
+          {menuWarnings.map((warning, index) => (
             <li key={`${index}-${warning}`}>• {warning}</li>
           ))}
         </ul>
@@ -867,7 +879,7 @@ export default function RoomPage() {
           placeId: candidate.id,
           restaurantName: candidate.name,
           restaurantAddress: candidate.address,
-          sources: [primarySource],
+          sources: candidate.orderingSources.slice(0, 3),
         }),
       });
       const data = (await response.json()) as RestaurantMenuApiResponse;
@@ -1997,7 +2009,9 @@ export default function RoomPage() {
                                             Google Maps primary ordering source
                                           </span>
                                           <span className="text-gray-400">
-                                            {candidateOrdering[candidate.id].sources.length > 0 ? "top-listed provider" : "not found"}
+                                            {candidateOrdering[candidate.id].sources.length > 0
+                                              ? `${candidateOrdering[candidate.id].sources.length} supported provider${candidateOrdering[candidate.id].sources.length === 1 ? "" : "s"}`
+                                              : "not found"}
                                           </span>
                                         </div>
 

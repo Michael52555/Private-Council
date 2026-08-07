@@ -35,7 +35,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "At least one ordering source is required." }, { status: 400 });
     }
 
-    const sources = body.sources.filter(isOrderingSource).slice(0, 1);
+    const sources = body.sources.filter(isOrderingSource).slice(0, 3);
     if (sources.length === 0) {
       return NextResponse.json({ error: "No valid HTTPS ordering sources were supplied." }, { status: 400 });
     }

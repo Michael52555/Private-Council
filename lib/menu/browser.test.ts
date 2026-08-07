@@ -5,6 +5,7 @@ import {
   scoreGoogleOrderControlLabel,
   selectFirstSupportedOrderingLink,
   selectGoogleOrderingLinkCandidates,
+  selectSupportedOrderingLinks,
 } from "@/lib/menu/browser";
 
 test("starts Panda location discovery on the restaurant city page", () => {
@@ -37,6 +38,21 @@ test("skips an unsupported first provider and selects the next registered adapte
   ]);
 
   assert.equal(selected?.href, "https://www.doordash.com/store/pressed-123");
+});
+
+test("preserves all supported ordering links for runtime fallback", () => {
+  const selected = selectSupportedOrderingLinks([
+    { href: "https://pressed.com/order", text: "Pressed" },
+    { href: "https://www.pandaexpress.com/location", text: "Panda pickup" },
+    { href: "https://www.doordash.com/store/panda-123", text: "DoorDash delivery" },
+    { href: "https://www.grubhub.com/restaurant/panda-123", text: "Grubhub delivery" },
+  ]);
+
+  assert.deepEqual(selected.map((candidate) => candidate.text), [
+    "Panda pickup",
+    "DoorDash delivery",
+    "Grubhub delivery",
+  ]);
 });
 
 test("keeps custom provider links when they are scoped to the Google ordering dialog", () => {

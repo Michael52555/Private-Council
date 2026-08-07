@@ -343,6 +343,24 @@ export async function renderPublicPage(rawUrl: string, options: RenderMenuPageOp
       waitUntil: "domcontentloaded",
       timeout: 25_000,
     });
+    if (navigationResponse && navigationResponse.status() >= 400) {
+      await Promise.allSettled([...pendingCaptures]);
+      return {
+        html: await page.content(),
+        finalUrl: page.url(),
+        jsonPayloads,
+        diagnostics: {
+          navigationStatus: navigationResponse.status(),
+          finalUrl: page.url(),
+          locationSelectionAttempted: false,
+          locationSelectionSucceeded: false,
+          capturedJsonResponseCount: jsonPayloads.length,
+          blockedResponseCount,
+          capturedJsonEndpoints: [...capturedJsonEndpoints],
+          blockedResponseEndpoints: [...blockedResponseEndpoints],
+        },
+      };
+    }
     await dismissOrderingPageConsent(page);
     await page.waitForLoadState("networkidle", { timeout: 6_000 }).catch(() => undefined);
     let locationResult = options.restaurantAddress
@@ -651,6 +669,53 @@ async function collectPageLinks(page: Page): Promise<LinkCandidate[]> {
   return links;
 }
 
+async function collectOrderingModeLinks(
+  page: Page,
+  dialogVisible: boolean,
+): Promise<LinkCandidate[]> {
+  const surface = dialogVisible
+    ? page.locator('[role="dialog"]:visible, [aria-modal="true"]:visible').last()
+    : page.locator("body");
+  const collected = await (dialogVisible
+    ? collectLinks(surface).catch(() => [] as LinkCandidate[])
+    : collectPageLinks(page));
+  const modeLabels = await surface
+    .locator('button, [role="button"], [role="tab"], [tabindex="0"]')
+    .evaluateAll((controls) => [
+      ...new Set(
+        controls
+          .map((control) =>
+            `${control.getAttribute("aria-label") ?? ""} ${control.textContent ?? ""}`
+              .replace(/\s+/g, " ")
+              .trim(),
+          )
+          .filter((label) => /^(?:pickup|delivery|自取|外送|外卖)$/i.test(label)),
+      ),
+    ])
+    .catch(() => [] as string[]);
+
+  for (const modeLabel of modeLabels) {
+    const exactMode = new RegExp(`^${modeLabel.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`, "i");
+    const control = surface
+      .getByRole("button", { name: exactMode })
+      .or(surface.getByRole("tab", { name: exactMode }))
+      .first();
+    if (!(await control.isVisible().catch(() => false))) continue;
+    await control.click({ timeout: 3_000 }).catch(() => undefined);
+    await page.waitForTimeout(800);
+    const modeLinks = dialogVisible
+      ? await collectLinks(surface).catch(() => [] as LinkCandidate[])
+      : await collectPageLinks(page);
+    collected.push(
+      ...modeLinks.map((link) => ({
+        ...link,
+        text: `${link.text} ${modeLabel}`.trim(),
+      })),
+    );
+  }
+  return collected;
+}
+
 function normalizedHref(rawUrl: string): string | null {
   try {
     return unwrapGoogleRedirect(rawUrl);
@@ -702,6 +767,12 @@ export function selectFirstSupportedOrderingLink(
   links: LinkCandidate[],
 ): LinkCandidate | undefined {
   return links.find((candidate) => Boolean(menuAdapterForUrl(candidate.href)));
+}
+
+export function selectSupportedOrderingLinks(
+  links: LinkCandidate[],
+): LinkCandidate[] {
+  return links.filter((candidate) => Boolean(menuAdapterForUrl(candidate.href)));
 }
 
 function sourceFromCandidate(
@@ -871,14 +942,16 @@ export async function discoverGoogleOrderingLinks(
       .last();
     const dialogVisible = await visibleDialog.isVisible().catch(() => false);
     const separateOrderingSurface = orderingPage !== page;
-    const inspectedLinks = dialogVisible
-      ? await collectLinks(visibleDialog).catch(() => [] as LinkCandidate[])
-      : await collectPageLinks(orderingPage);
+    const inspectedLinks = await collectOrderingModeLinks(
+      orderingPage,
+      dialogVisible,
+    );
     const selectedLinks = selectGoogleOrderingLinkCandidates(inspectedLinks, {
       baselineHrefs,
       withinDialog: dialogVisible || separateOrderingSurface,
     });
-    const primarySelectedLink = selectFirstSupportedOrderingLink(selectedLinks);
+    const supportedSelectedLinks = selectSupportedOrderingLinks(selectedLinks);
+    const primarySelectedLink = supportedSelectedLinks[0];
     const skippedUnsupportedProviders = selectedLinks
       .slice(
         0,
@@ -889,14 +962,14 @@ export async function discoverGoogleOrderingLinks(
       .filter((candidate) => !menuAdapterForUrl(candidate.href))
       .map((candidate) => candidate.text || new URL(candidate.href).hostname);
 
-    if (primarySelectedLink) {
-      sources.push(
+    sources.push(
+      ...supportedSelectedLinks.map((candidate) =>
         sourceFromCandidate(
-          primarySelectedLink,
+          candidate,
           dialogVisible ? "google_maps_dialog" : "google_maps_new_link",
         ),
-      );
-    }
+      ),
+    );
 
     const providerControls =
       !primarySelectedLink && navigationCandidates.length === 0
@@ -920,10 +993,14 @@ export async function discoverGoogleOrderingLinks(
       await orderingPage.waitForTimeout(2_500);
     }
 
-    const finalNavigationCandidate = navigationCandidates.at(-1);
-    if (!primarySelectedLink && finalNavigationCandidate) {
+    const supportedNavigationCandidates = selectSupportedOrderingLinks(
+      navigationCandidates,
+    );
+    if (!primarySelectedLink && supportedNavigationCandidates.length > 0) {
       sources.push(
-        sourceFromCandidate(finalNavigationCandidate, "google_maps_navigation"),
+        ...supportedNavigationCandidates.map((candidate) =>
+          sourceFromCandidate(candidate, "google_maps_navigation"),
+        ),
       );
     }
 
@@ -954,7 +1031,7 @@ export async function discoverGoogleOrderingLinks(
       ]),
     ].slice(0, 20);
 
-    const dedupedSources = dedupeSources(sources).slice(0, 1);
+    const dedupedSources = dedupeSources(sources).slice(0, 6);
     if (dedupedSources.length === 0) {
       if (
         skippedUnsupportedProviders.length > 0 ||

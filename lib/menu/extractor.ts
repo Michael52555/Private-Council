@@ -82,28 +82,10 @@ export async function extractMenuFromSource(
     (extraction.items.length === 0 || adapter.captureNetworkJson)
   ) {
     try {
-      let rendered = await renderPublicPage(source.url, {
+      const rendered = await renderPublicPage(source.url, {
         adapterId: adapter.id,
         restaurantAddress: context.restaurantAddress,
       });
-      if (
-        adapter.id === "panda_express" &&
-        rendered.diagnostics.navigationStatus === 403
-      ) {
-        try {
-          rendered = await renderPublicPage(source.url, {
-            adapterId: adapter.id,
-            restaurantAddress: context.restaurantAddress,
-            headless: false,
-          });
-        } catch (error) {
-          warnings.push(
-            error instanceof Error
-              ? `Visible-browser retry failed: ${error.message}`
-              : "Visible-browser retry failed.",
-          );
-        }
-      }
       const providerJsonExtraction = extractProviderMenuFromJson(
         rendered.jsonPayloads,
         source,
@@ -205,22 +187,40 @@ function summarizePrices(items: MenuItem[]): RestaurantMenuResult["priceSummary"
   };
 }
 
+export async function extractMenusWithFallback(
+  sources: OrderingSource[],
+  context: { restaurantAddress?: string } = {},
+  extractSource: (
+    source: OrderingSource,
+    context: { restaurantAddress?: string },
+  ) => Promise<ExtractedMenu> = extractMenuFromSource,
+): Promise<ExtractedMenu[]> {
+  const menus: ExtractedMenu[] = [];
+  for (const [sourceIndex, source] of sources.slice(0, 3).entries()) {
+    const menu = await extractSource(source, context);
+    const pricedItemCount = menu.items.filter(
+      (item) => typeof item.price === "number",
+    ).length;
+    if (sourceIndex > 0 && pricedItemCount >= 3) {
+      menu.warnings.unshift(
+        `Fallback provider used after ${sourceIndex} higher-listed source${sourceIndex === 1 ? "" : "s"} returned no reliable menu prices.`,
+      );
+    }
+    menus.push(menu);
+    if (pricedItemCount >= 3) break;
+  }
+  return menus;
+}
+
 export async function extractRestaurantMenus(input: {
   placeId: string;
   restaurantName?: string;
   restaurantAddress?: string;
   sources: OrderingSource[];
 }): Promise<RestaurantMenuResult> {
-  const menus: ExtractedMenu[] = [];
-  const primarySource = input.sources[0];
-
-  // Discovery has already selected the first top-to-bottom provider with a
-  // registered scraper adapter. Never fall through to a second source here.
-  if (primarySource) {
-    menus.push(await extractMenuFromSource(primarySource, {
-      restaurantAddress: input.restaurantAddress,
-    }));
-  }
+  const menus = await extractMenusWithFallback(input.sources, {
+    restaurantAddress: input.restaurantAddress,
+  });
 
   const items = menus.flatMap((menu) => menu.items);
   return {
