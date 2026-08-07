@@ -82,10 +82,28 @@ export async function extractMenuFromSource(
     (extraction.items.length === 0 || adapter.captureNetworkJson)
   ) {
     try {
-      const rendered = await renderPublicPage(source.url, {
+      let rendered = await renderPublicPage(source.url, {
         adapterId: adapter.id,
         restaurantAddress: context.restaurantAddress,
       });
+      if (
+        adapter.id === "panda_express" &&
+        rendered.diagnostics.navigationStatus === 403
+      ) {
+        try {
+          rendered = await renderPublicPage(source.url, {
+            adapterId: adapter.id,
+            restaurantAddress: context.restaurantAddress,
+            headless: false,
+          });
+        } catch (error) {
+          warnings.push(
+            error instanceof Error
+              ? `Visible-browser retry failed: ${error.message}`
+              : "Visible-browser retry failed.",
+          );
+        }
+      }
       const providerJsonExtraction = extractProviderMenuFromJson(
         rendered.jsonPayloads,
         source,

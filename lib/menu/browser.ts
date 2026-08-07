@@ -65,7 +65,7 @@ export function isBrowserConfigured(): boolean {
   );
 }
 
-async function openBrowser(): Promise<{ browser: Browser; remote: boolean }> {
+async function openBrowser(headless = true): Promise<{ browser: Browser; remote: boolean }> {
   const wsEndpoint = process.env.PLAYWRIGHT_WS_ENDPOINT ?? process.env.BROWSER_WS_ENDPOINT;
   if (wsEndpoint) {
     return { browser: await chromium.connectOverCDP(wsEndpoint), remote: true };
@@ -76,7 +76,7 @@ async function openBrowser(): Promise<{ browser: Browser; remote: boolean }> {
     systemChromePath();
   if (executablePath) {
     return {
-      browser: await chromium.launch({ executablePath, headless: true }),
+      browser: await chromium.launch({ executablePath, headless }),
       remote: false,
     };
   }
@@ -84,13 +84,14 @@ async function openBrowser(): Promise<{ browser: Browser; remote: boolean }> {
   throw new BrowserNotConfiguredError();
 }
 
-async function withPage<T>(task: (page: Page, context: BrowserContext) => Promise<T>): Promise<T> {
-  const { browser } = await openBrowser();
+async function withPage<T>(
+  task: (page: Page, context: BrowserContext) => Promise<T>,
+  options: { headless?: boolean } = {},
+): Promise<T> {
+  const { browser } = await openBrowser(options.headless ?? true);
   const context = await browser.newContext({
     locale: "en-US",
     viewport: { width: 1440, height: 1200 },
-    userAgent:
-      "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
     extraHTTPHeaders: {
       "Accept-Language": "en-US,en;q=0.9",
     },
@@ -110,6 +111,7 @@ type RenderMenuPageOptions = {
   adapterId?: MenuAdapterId;
   restaurantAddress?: string;
   restaurantName?: string;
+  headless?: boolean;
 };
 
 export function providerStartUrl(
@@ -186,44 +188,53 @@ async function findLocationInput(page: Page): Promise<Locator | undefined> {
   return undefined;
 }
 
+async function clickMatchingLocationResult(
+  page: Page,
+  address: string,
+): Promise<boolean> {
+  const addressStem = address.split(",")[0]?.trim();
+  if (!addressStem || addressStem.length < 4) return false;
+
+  for (const frame of page.frames()) {
+    const matches = frame.getByText(addressStem, { exact: false });
+    const count = Math.min(await matches.count().catch(() => 0), 8);
+    for (let index = 0; index < count; index += 1) {
+      const match = matches.nth(index);
+      if (!(await match.isVisible().catch(() => false))) continue;
+      const clickable = match.locator(
+        "xpath=ancestor-or-self::*[self::button or self::a or @role='button' or @role='link'][1] | ancestor::*[.//a or .//button][1]//a[contains(translate(normalize-space(.), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'order') or contains(translate(normalize-space(.), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'select')][1] | ancestor::*[.//a or .//button][1]//button[contains(translate(normalize-space(.), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'order') or contains(translate(normalize-space(.), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'select')][1]",
+      ).first();
+      if (!(await clickable.isVisible().catch(() => false))) continue;
+      await clickable.click({ timeout: 3_000 }).catch(() => undefined);
+      return true;
+    }
+  }
+  return false;
+}
+
 async function attemptLocationSelection(
   page: Page,
   address: string,
 ): Promise<{ attempted: boolean; succeeded: boolean }> {
   const initialUrl = page.url();
-  const addressStem = address.split(",")[0]?.trim();
-  let clickedResult = false;
-  if (addressStem && addressStem.length >= 4) {
-    for (const frame of page.frames()) {
-      const matches = frame.getByText(addressStem, { exact: false });
-      const count = Math.min(await matches.count().catch(() => 0), 6);
-      for (let index = 0; index < count; index += 1) {
-        const match = matches.nth(index);
-        if (!(await match.isVisible().catch(() => false))) continue;
-        const clickable = match.locator(
-          "xpath=ancestor-or-self::*[self::button or self::a or @role='button' or @role='link'][1] | ancestor::*[.//a or .//button][1]//a[contains(translate(normalize-space(.), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'order')][1] | ancestor::*[.//a or .//button][1]//button[contains(translate(normalize-space(.), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'order')][1]",
-        ).first();
-        if (await clickable.isVisible().catch(() => false)) {
-          await clickable.click({ timeout: 3_000 }).catch(() => undefined);
-          clickedResult = true;
-          break;
-        }
-      }
-      if (clickedResult) break;
-    }
-  }
+  let clickedResult = await clickMatchingLocationResult(page, address);
 
   const input = clickedResult ? undefined : await findLocationInput(page);
   if (!clickedResult && input) {
     await input.fill(address).catch(() => undefined);
+    await page.waitForTimeout(1_000);
+    await input.press("ArrowDown").catch(() => undefined);
     await input.press("Enter").catch(() => undefined);
     await page.waitForTimeout(1_500);
+    clickedResult = await clickMatchingLocationResult(page, address);
   }
 
   if (!clickedResult && !input) return { attempted: false, succeeded: false };
 
   const clickedCta = clickedResult || await clickFirstVisible(page, [
     /select (?:this )?location/i,
+    /choose (?:this )?location/i,
+    /order from (?:this )?location/i,
     /start (?:an )?order/i,
     /order (?:now|pickup|here)/i,
     /view menu/i,
@@ -373,7 +384,7 @@ export async function renderPublicPage(rawUrl: string, options: RenderMenuPageOp
         blockedResponseEndpoints: [...blockedResponseEndpoints],
       },
     };
-  });
+  }, { headless: options.headless });
 }
 
 function isGoogleMapsHost(hostname: string): boolean {
