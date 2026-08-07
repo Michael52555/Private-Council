@@ -124,7 +124,7 @@ export function providerStartUrl(
   }
 
   const url = new URL(rawUrl);
-  if (!/^\/locations\/?$/i.test(url.pathname)) return rawUrl;
+  if (!/^\/locations?\/?$/i.test(url.pathname)) return rawUrl;
   const parts = options.restaurantAddress.split(",").map((part) => part.trim());
   const city = parts.at(-3);
   const stateMatch = parts.at(-2)?.match(/^([A-Z]{2})\b/i);
@@ -248,6 +248,20 @@ async function triggerLazyMenuLoading(page: Page): Promise<void> {
   }).catch(() => undefined);
 }
 
+function isNonMenuProviderEndpoint(rawUrl: string): boolean {
+  try {
+    const url = new URL(rawUrl);
+    const target = `${url.hostname}${url.pathname}`.toLowerCase();
+    return (
+      /cookielaw\.org|cookiebot\.com|onetrust\.com|contentful\.com/.test(target) ||
+      /\/auth\/(?:refresh|session)|\/consent\/|\/locales?\/|\/translations?\//.test(target) ||
+      /\/(?:en|en-us)\.json$/.test(target)
+    );
+  } catch {
+    return false;
+  }
+}
+
 export async function renderPublicPage(rawUrl: string, options: RenderMenuPageOptions = {}): Promise<{
   html: string;
   finalUrl: string;
@@ -273,7 +287,8 @@ export async function renderPublicPage(rawUrl: string, options: RenderMenuPageOp
     };
 
     context.on("response", (response) => {
-      if ([401, 403, 429].includes(response.status())) {
+      const ignoredEndpoint = isNonMenuProviderEndpoint(response.url());
+      if (!ignoredEndpoint && [401, 403, 429].includes(response.status())) {
         blockedResponseCount += 1;
         if (blockedResponseEndpoints.size < 8) {
           blockedResponseEndpoints.add(safeEndpoint(response.url()));
@@ -281,6 +296,7 @@ export async function renderPublicPage(rawUrl: string, options: RenderMenuPageOp
       }
       if (jsonPayloads.length >= 60 || capturedBytes >= 12_000_000) return;
       const capture = (async () => {
+        if (ignoredEndpoint) return;
         const contentType = (await response.headerValue("content-type")) ?? "";
         if (!/json/i.test(contentType)) return;
         const declaredLength = Number(

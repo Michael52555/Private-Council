@@ -235,6 +235,49 @@ function dedupe(items: MenuItem[]): MenuItem[] {
   return [...byIdentity.values()];
 }
 
+function extractGrubhubSemanticDom(
+  html: string,
+  source: OrderingSource,
+): MenuItem[] {
+  const $ = cheerio.load(html);
+  const items: MenuItem[] = [];
+  const nonItemHeading = /^(?:menu|delivery|pickup|reviews?|hours|faqs?|best sellers|start group order|see the full schedule)$/i;
+
+  $("h3, h4, h5, h6, [role='heading']").each((_, element) => {
+    const name = $(element).text().replace(/\s+/g, " ").trim();
+    if (!name || name.length > 180 || nonItemHeading.test(name)) return;
+
+    let container = $(element);
+    let price: number | undefined;
+    for (let depth = 0; depth < 6; depth += 1) {
+      const text = container.text().replace(/\s+/g, " ");
+      const prices = [...text.matchAll(/\$([0-9]+(?:\.[0-9]{2})?)(?:\+)?/g)];
+      if (prices.length >= 1 && prices.length <= 2) {
+        price = Number(prices[0][1]);
+        break;
+      }
+      container = container.parent();
+      if (container.length === 0) break;
+    }
+    if (price === undefined || !Number.isFinite(price)) return;
+    const description = container
+      .find("p")
+      .first()
+      .text()
+      .replace(/\s+/g, " ")
+      .trim();
+    items.push({
+      id: itemId(source.id, name, undefined, price),
+      name,
+      ...(description && description !== name ? { description } : {}),
+      price: Math.round(price * 100) / 100,
+      currency: "USD",
+      sourceId: source.id,
+    });
+  });
+  return dedupe(items);
+}
+
 export function extractProviderMenuFromJson(
   payloads: CapturedJsonPayload[],
   source: OrderingSource,
@@ -289,5 +332,16 @@ export function extractProviderMenuFromHtml(
       // Ignore malformed state blocks and keep looking for valid menu JSON.
     }
   });
-  return extractProviderMenuFromJson(payloads, source, adapterId);
+  const embedded = extractProviderMenuFromJson(payloads, source, adapterId);
+  const semanticItems = adapterId === "grubhub"
+    ? extractGrubhubSemanticDom(html, source)
+    : [];
+  const items = dedupe([...embedded.items, ...semanticItems]).slice(0, 750);
+  return {
+    items,
+    methods: new Set([
+      ...(embedded.items.length > 0 ? (["embedded_json"] as const) : []),
+      ...(semanticItems.length > 0 ? (["dom"] as const) : []),
+    ]),
+  };
 }

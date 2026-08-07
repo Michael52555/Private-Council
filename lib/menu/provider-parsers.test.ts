@@ -109,3 +109,32 @@ test("applies the provider schema to embedded Taco Bell state", () => {
   assert.deepEqual(result.items.map((item) => item.name), ["Crunchy Taco"]);
   assert.equal(result.items[0].price, 1.99);
 });
+
+test("extracts a public Grubhub menu from semantic headings when its JSON API is unavailable", () => {
+  const source = makeOrderingSource({
+    url: "https://www.grubhub.com/restaurant/example/123",
+    discoveredFrom: "google_maps",
+  });
+  const result = extractProviderMenuFromHtml(`
+    <main>
+      <section>
+        <h3>Chicken</h3>
+        <article><h6>Hawaiian BBQ Chicken</h6><p>Rice and macaroni salad.</p><span>$22.99</span></article>
+        <article><h6>Chicken Katsu</h6><p>Crispy breaded chicken.</p><span>$21.99</span></article>
+        <article><h6>Teriyaki Chicken</h6><span>$20.99</span></article>
+        <article><h6>Maui Pineapple Chicken</h6><span>$24.99</span></article>
+      </section>
+    </main>
+  `, source, "grubhub");
+
+  assert.deepEqual(
+    result.items.map((item) => [item.name, item.price]),
+    [
+      ["Hawaiian BBQ Chicken", 22.99],
+      ["Chicken Katsu", 21.99],
+      ["Teriyaki Chicken", 20.99],
+      ["Maui Pineapple Chicken", 24.99],
+    ],
+  );
+  assert(result.methods.has("dom"));
+});

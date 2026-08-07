@@ -15,6 +15,13 @@ test("starts Panda location discovery on the restaurant city page", () => {
     }),
     "https://www.pandaexpress.com/locations/ca/irvine/",
   );
+  assert.equal(
+    providerStartUrl("https://www.pandaexpress.com/location", {
+      adapterId: "panda_express",
+      restaurantAddress: "2190 Barranca Pkwy, Irvine, CA 92606, USA",
+    }),
+    "https://www.pandaexpress.com/locations/ca/irvine/",
+  );
 });
 
 test("recognizes the Chinese online-order control but rejects sponsored order ads", () => {
