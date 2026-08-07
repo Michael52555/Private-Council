@@ -41,6 +41,7 @@ export type OrderingDiscoveryDiagnostics = {
   inspectedLinkCount: number;
   visibleControlLabels: string[];
   unresolvedControlLabels: string[];
+  skippedUnsupportedProviders?: string[];
 };
 
 export type MenuItem = {

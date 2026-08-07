@@ -262,6 +262,23 @@ export function extractMenuFromHtml(
   return { items: dedupeItems(items).slice(0, 750), methods };
 }
 
+export function extractMenuFromJsonPayloads(
+  payloads: unknown[],
+  source: OrderingSource,
+): HtmlMenuExtraction {
+  const items: MenuItem[] = [];
+  for (const payload of payloads) {
+    walkEmbeddedJson(payload, source.id, items, new WeakSet<object>());
+    if (items.length >= 750) break;
+  }
+  return {
+    items: dedupeItems(items).slice(0, 750),
+    methods: items.length > 0
+      ? new Set(["embedded_json"] as const)
+      : new Set<"json_ld" | "embedded_json" | "dom">(),
+  };
+}
+
 export function discoverOrderLinksFromHtml(
   html: string,
   baseUrl: string,

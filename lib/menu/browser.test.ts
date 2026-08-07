@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   scoreGoogleOrderControlLabel,
+  selectFirstSupportedOrderingLink,
   selectGoogleOrderingLinkCandidates,
 } from "@/lib/menu/browser";
 
@@ -10,11 +11,25 @@ test("recognizes the Chinese online-order control but rejects sponsored order ad
   assert.equal(scoreGoogleOrderControlLabel("立即订餐 · 广告主: GrubHub, Inc."), -1);
 });
 
+test("skips an unsupported first provider and selects the next registered adapter", () => {
+  const selected = selectFirstSupportedOrderingLink([
+    { href: "https://pressed.com/order", text: "Pressed" },
+    { href: "https://www.doordash.com/store/pressed-123", text: "DoorDash" },
+    { href: "https://www.grubhub.com/restaurant/pressed-123", text: "Grubhub" },
+  ]);
+
+  assert.equal(selected?.href, "https://www.doordash.com/store/pressed-123");
+});
+
 test("keeps custom provider links when they are scoped to the Google ordering dialog", () => {
   const links = selectGoogleOrderingLinkCandidates(
     [
       { href: "https://order.example-restaurant.com/store/123", text: "Order pickup" },
       { href: "https://policies.google.com/privacy", text: "Privacy" },
+      {
+        href: "https://www.grubhub.com/restaurant/sponsored",
+        text: "Sponsored · Claim $10 off your first order",
+      },
     ],
     { withinDialog: true },
   );

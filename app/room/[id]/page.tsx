@@ -2088,6 +2088,11 @@ export default function RoomPage() {
                                                 Unresolved controls: {candidateOrdering[candidate.id].diagnostics?.unresolvedControlLabels.join(", ")}
                                               </p>
                                             )}
+                                            {(candidateOrdering[candidate.id].diagnostics?.skippedUnsupportedProviders?.length ?? 0) > 0 && (
+                                              <p className="mt-1 break-words">
+                                                Skipped unsupported providers: {candidateOrdering[candidate.id].diagnostics?.skippedUnsupportedProviders?.join(" · ")}
+                                              </p>
+                                            )}
                                           </div>
                                         )}
 

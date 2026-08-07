@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { discoverOrderLinksFromHtml, extractMenuFromHtml } from "@/lib/menu/html";
+import {
+  discoverOrderLinksFromHtml,
+  extractMenuFromHtml,
+  extractMenuFromJsonPayloads,
+} from "@/lib/menu/html";
 import { inferProvider, makeOrderingSource } from "@/lib/menu/providers";
 
 test("extracts schema.org menu sections and items", () => {
@@ -79,6 +83,35 @@ test("deduplicates repeated copies of the same item across embedded sections", (
   assert.equal(result.items.length, 1);
   assert.equal(result.items[0].name, "Chicken bowl");
   assert.equal(result.items[0].price, 12.99);
+});
+
+test("extracts menu items from browser-captured provider JSON", () => {
+  const source = makeOrderingSource({
+    url: "https://www.doordash.com/store/example-123",
+    discoveredFrom: "google_maps",
+  });
+  const result = extractMenuFromJsonPayloads(
+    [
+      {
+        menu: {
+          categories: [
+            {
+              name: "Tacos",
+              items: [
+                { name: "Crunchy taco", price: 299, currencyCode: "USD" },
+              ],
+            },
+          ],
+        },
+      },
+    ],
+    source,
+  );
+
+  assert.equal(result.items.length, 1);
+  assert.equal(result.items[0].name, "Crunchy taco");
+  assert.equal(result.items[0].price, 2.99);
+  assert(result.methods.has("embedded_json"));
 });
 
 test("discovers both known providers and custom order links", () => {

@@ -12,6 +12,10 @@ import {
   makeOrderingSource,
   unwrapGoogleRedirect,
 } from "@/lib/menu/providers";
+import {
+  menuAdapterForControlLabel,
+  menuAdapterForUrl,
+} from "@/lib/menu/adapters";
 import { assertPublicHttpsUrl } from "@/lib/menu/security";
 import type {
   OrderingDiscoveryDiagnostics,
@@ -97,12 +101,48 @@ async function withPage<T>(task: (page: Page, context: BrowserContext) => Promis
 export async function renderPublicPage(rawUrl: string): Promise<{
   html: string;
   finalUrl: string;
+  jsonPayloads: unknown[];
 }> {
   const url = await assertPublicHttpsUrl(rawUrl);
   return withPage(async (page) => {
+    const jsonPayloads: unknown[] = [];
+    const pendingCaptures = new Set<Promise<void>>();
+    let capturedBytes = 0;
+
+    page.on("response", (response) => {
+      if (jsonPayloads.length >= 60 || capturedBytes >= 12_000_000) return;
+      const capture = (async () => {
+        const contentType = (await response.headerValue("content-type")) ?? "";
+        if (!/json/i.test(contentType)) return;
+        const declaredLength = Number(
+          (await response.headerValue("content-length")) ?? "0",
+        );
+        if (Number.isFinite(declaredLength) && declaredLength > 2_500_000) return;
+
+        const text = await response.text();
+        if (!text || text.length > 2_500_000) return;
+        if (!/"(?:menu|menus|item|items|product|products|categor(?:y|ies)|price|amount)"\s*:/i.test(text)) {
+          return;
+        }
+        capturedBytes += text.length;
+        if (capturedBytes > 12_000_000) return;
+        try {
+          jsonPayloads.push(JSON.parse(text) as unknown);
+        } catch {
+          // Ignore non-JSON responses with an inaccurate content type.
+        }
+      })().catch(() => undefined);
+      pendingCaptures.add(capture);
+    });
+
     await page.goto(url.toString(), { waitUntil: "domcontentloaded", timeout: 20_000 });
     await page.waitForLoadState("networkidle", { timeout: 6_000 }).catch(() => undefined);
-    return { html: await page.content(), finalUrl: page.url() };
+    await Promise.allSettled([...pendingCaptures]);
+    return {
+      html: await page.content(),
+      finalUrl: page.url(),
+      jsonPayloads,
+    };
   });
 }
 
@@ -164,7 +204,8 @@ const broadOrderControlText =
   /order online|online ordering|place an order|order food|在线订餐|线上订餐|网上订餐/i;
 const orderingEvidenceText =
   /order|pickup|pick-up|delivery|takeout|door\s*dash|uber\s*eats|grubhub|toast|chownow|olo|square|clover|订餐|外带|外送|自取/i;
-const nonProviderText = /privacy|terms|help|learn more|sign in|log in/i;
+const nonProviderText =
+  /privacy|terms|help|learn more|sign in|log in|sponsored|广告主|claim \$/i;
 
 function controlLabel(element: Element): string {
   return `${element.getAttribute("aria-label") ?? ""} ${element.textContent ?? ""}`
@@ -416,6 +457,12 @@ export function selectGoogleOrderingLinkCandidates(
   });
 }
 
+export function selectFirstSupportedOrderingLink(
+  links: LinkCandidate[],
+): LinkCandidate | undefined {
+  return links.find((candidate) => Boolean(menuAdapterForUrl(candidate.href)));
+}
+
 function sourceFromCandidate(
   candidate: LinkCandidate,
   discoveryMethod: NonNullable<OrderingSource["discoveryMethod"]>,
@@ -590,7 +637,16 @@ export async function discoverGoogleOrderingLinks(
       baselineHrefs,
       withinDialog: dialogVisible || separateOrderingSurface,
     });
-    const primarySelectedLink = selectedLinks[0];
+    const primarySelectedLink = selectFirstSupportedOrderingLink(selectedLinks);
+    const skippedUnsupportedProviders = selectedLinks
+      .slice(
+        0,
+        primarySelectedLink
+          ? selectedLinks.indexOf(primarySelectedLink)
+          : selectedLinks.length,
+      )
+      .filter((candidate) => !menuAdapterForUrl(candidate.href))
+      .map((candidate) => candidate.text || new URL(candidate.href).hostname);
 
     if (primarySelectedLink) {
       sources.push(
@@ -605,7 +661,18 @@ export async function discoverGoogleOrderingLinks(
       !primarySelectedLink && navigationCandidates.length === 0
         ? await findProviderControls(orderingPage, new Set(visibleControlLabels))
         : [];
-    const primaryProviderControl = providerControls[0];
+    const primaryProviderControl = providerControls.find((candidate) =>
+      Boolean(menuAdapterForControlLabel(candidate.label)),
+    );
+    const skippedUnsupportedControls = providerControls
+      .slice(
+        0,
+        primaryProviderControl
+          ? providerControls.indexOf(primaryProviderControl)
+          : providerControls.length,
+      )
+      .filter((candidate) => !menuAdapterForControlLabel(candidate.label))
+      .map((candidate) => candidate.label);
 
     if (primaryProviderControl) {
       await primaryProviderControl.locator.click({ timeout: 5_000 }).catch(() => undefined);
@@ -648,6 +715,14 @@ export async function discoverGoogleOrderingLinks(
 
     const dedupedSources = dedupeSources(sources).slice(0, 1);
     if (dedupedSources.length === 0) {
+      if (
+        skippedUnsupportedProviders.length > 0 ||
+        skippedUnsupportedControls.length > 0
+      ) {
+        warnings.push(
+          "Google Maps exposed ordering providers, but none matched a registered menu scraper adapter.",
+        );
+      }
       warnings.push(
         dialogVisible
           ? "The Online ordering panel opened, but it did not expose a resolvable HTTPS provider link."
@@ -680,6 +755,12 @@ export async function discoverGoogleOrderingLinks(
         inspectedLinkCount: inspectedLinks.length,
         visibleControlLabels,
         unresolvedControlLabels,
+        skippedUnsupportedProviders: [
+          ...new Set([
+            ...skippedUnsupportedProviders,
+            ...skippedUnsupportedControls,
+          ]),
+        ].slice(0, 20),
       },
     };
   });
