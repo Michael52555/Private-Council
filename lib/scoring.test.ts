@@ -84,6 +84,24 @@ test("keeps the restaurant score pending before menu prices load", () => {
   ]);
 });
 
+test("does not score a Google fallback until menu enrichment finishes", () => {
+  const score = evaluateRestaurantScore(
+    candidate({
+      estimatedPriceMin: 10,
+      estimatedPriceMax: 20,
+      budgetEstimateSource: "google_price_range",
+      budgetEstimateConfidence: "medium",
+      budgetEstimateCurrency: "USD",
+      menuStatus: "loading",
+    }),
+    preferences,
+  );
+
+  assert.equal(score.breakdown[1].status, "pending");
+  assert.equal(score.breakdown[1].score, null);
+  assert.equal(score.totalScore, null);
+});
+
 test("scores the budget only after menu-derived prices load", () => {
   const score = evaluateRestaurantScore(
     candidate({
@@ -141,6 +159,7 @@ test("uses Google fallback for clear within-budget and outside-budget decisions"
     budgetEstimateSource: "google_price_range",
     budgetEstimateConfidence: "medium",
     budgetEstimateCurrency: "USD",
+    menuStatus: "unavailable",
   });
 
   const within = evaluateRestaurantScore(googleCandidate, preferences);

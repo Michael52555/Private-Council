@@ -315,9 +315,15 @@ function PrimaryMenuPanel({ state }: { state?: CandidateMenuState }) {
   if (!state || state.status === "loading") return null;
   if (state.status === "error") {
     return (
-      <p className="mt-3 rounded-xl border border-red-400/15 bg-red-500/10 p-3 text-xs leading-5 text-red-200">
-        Primary menu scrape failed: {state.error}
-      </p>
+      <details className="mt-3 rounded-xl border border-white/10 bg-black/15 px-3 py-2 text-xs">
+        <summary className="flex cursor-pointer list-none items-center justify-between gap-3 text-gray-400 [&::-webkit-details-marker]:hidden">
+          <span className="font-medium">Menu data unavailable</span>
+          <span className="text-[10px] text-gray-500">View reason</span>
+        </summary>
+        <p className="mt-2 border-t border-white/10 pt-2 leading-5 text-red-200/80">
+          {state.error}
+        </p>
+      </details>
     );
   }
 
@@ -341,51 +347,53 @@ function PrimaryMenuPanel({ state }: { state?: CandidateMenuState }) {
     ),
   );
   return (
-    <div className="mt-3 rounded-xl border border-emerald-300/15 bg-emerald-500/5 p-3 text-xs">
-      <div className="flex items-center justify-between gap-3">
-        <span className="font-semibold text-emerald-200">
-          {effectiveMenuIndex > 0 ? "Fallback provider menu" : "Primary provider menu"}
+    <details className="mt-3 rounded-xl border border-emerald-300/15 bg-emerald-500/5 px-3 py-2 text-xs">
+      <summary className="flex cursor-pointer list-none items-center justify-between gap-3 [&::-webkit-details-marker]:hidden">
+        <span className="font-semibold text-emerald-200">Menu data</span>
+        <span className="text-[10px] text-gray-400">
+          {pricedItems.length} priced · View
         </span>
-        <span className="text-gray-400">
-          {state.result.items.length} items · {pricedItems.length} priced
-        </span>
-      </div>
-      <p className="mt-2 text-[10px] text-gray-500">
-        Extraction: {menu?.extractionMethod ?? "none"} · basis: {state.result.priceSummary.basis.replaceAll("_", " ")}
-        {state.result.priceSummary.excludedItemCount > 0
-          ? ` · ${state.result.priceSummary.excludedItemCount} non-meal items excluded`
-          : ""}
-      </p>
-      {state.result.priceSummary.sampleItemCount >= 3 && (
-        <p className="mt-2 text-emerald-100">
-          Typical meal estimate: ${state.result.priceSummary.lowerQuartile?.toFixed(2)}–$
-          {state.result.priceSummary.upperQuartile?.toFixed(2)} · median $
-          {state.result.priceSummary.median?.toFixed(2)}
+      </summary>
+
+      <div className="mt-2 border-t border-white/10 pt-2">
+        <div className="flex items-center justify-between gap-3">
+          <span className="font-semibold text-emerald-200/80">
+            {effectiveMenuIndex > 0 ? "Fallback provider menu" : "Primary provider menu"}
+          </span>
+          <span className="text-gray-400">{state.result.items.length} items</span>
+        </div>
+        <p className="mt-2 text-[10px] text-gray-500">
+          Extraction: {menu?.extractionMethod ?? "none"} · basis: {state.result.priceSummary.basis.replaceAll("_", " ")}
+          {state.result.priceSummary.excludedItemCount > 0
+            ? ` · ${state.result.priceSummary.excludedItemCount} non-meal items excluded`
+            : ""}
         </p>
-      )}
-      {typicalMealItems.length > 0 && (
-        <ul className="mt-3 space-y-1 text-gray-300">
-          {typicalMealItems.slice(0, 8).map((item) => (
-            <li key={item.id} className="flex justify-between gap-3">
-              <span className="truncate">{item.name}</span>
-              <span className="shrink-0">${item.price.toFixed(2)}</span>
-            </li>
-          ))}
-        </ul>
-      )}
-      {menuWarnings.length > 0 && (
-        <details className="mt-3 border-t border-white/10 pt-3 text-[10px] text-gray-500">
-          <summary className="cursor-pointer select-none font-medium text-gray-400 marker:text-gray-600">
-            Show scraper details · {menuWarnings.length} warning{menuWarnings.length === 1 ? "" : "s"}
-          </summary>
-          <ul className="mt-3 space-y-1 leading-4 text-amber-200/80">
+        {state.result.priceSummary.sampleItemCount >= 3 && (
+          <p className="mt-2 text-emerald-100">
+            Typical meal estimate: ${state.result.priceSummary.lowerQuartile?.toFixed(2)}–$
+            {state.result.priceSummary.upperQuartile?.toFixed(2)} · median $
+            {state.result.priceSummary.median?.toFixed(2)}
+          </p>
+        )}
+        {typicalMealItems.length > 0 && (
+          <ul className="mt-3 space-y-1 text-gray-300">
+            {typicalMealItems.slice(0, 8).map((item) => (
+              <li key={item.id} className="flex justify-between gap-3">
+                <span className="truncate">{item.name}</span>
+                <span className="shrink-0">${item.price.toFixed(2)}</span>
+              </li>
+            ))}
+          </ul>
+        )}
+        {menuWarnings.length > 0 && (
+          <ul className="mt-3 space-y-1 border-t border-white/10 pt-3 text-[10px] leading-4 text-amber-200/80">
             {menuWarnings.map((warning, index) => (
               <li key={`${index}-${warning}`}>• {warning}</li>
             ))}
           </ul>
-        </details>
-      )}
-    </div>
+        )}
+      </div>
+    </details>
   );
 }
 
@@ -533,6 +541,7 @@ function OrderingSourcesPanel({ state }: { state: CandidateOrderingState }) {
 }
 
 function BudgetEstimatePanel({ candidate }: { candidate: RestaurantCandidate }) {
+  const isCheckingMenu = candidate.menuStatus === "pending" || candidate.menuStatus === "loading";
   const minimum = candidate.estimatedPriceMin;
   const maximum = candidate.estimatedPriceMax;
   const hasRange = typeof minimum === "number" && typeof maximum === "number";
@@ -549,6 +558,20 @@ function BudgetEstimatePanel({ candidate }: { candidate: RestaurantCandidate }) 
   const currencyPrefix = !candidate.budgetEstimateCurrency || candidate.budgetEstimateCurrency === "USD"
     ? "$"
     : `${candidate.budgetEstimateCurrency} `;
+
+  if (isCheckingMenu) {
+    return (
+      <div className="mt-4 rounded-xl border border-sky-300/15 bg-sky-500/5 p-3 text-xs" aria-live="polite">
+        <div className="flex items-center gap-2 font-semibold text-sky-200">
+          <span className="h-2 w-2 animate-pulse rounded-full bg-sky-300" />
+          Checking menu prices...
+        </div>
+        <p className="mt-2 text-[10px] leading-4 text-gray-500">
+          A Google estimate will appear only if reliable menu prices cannot be extracted.
+        </p>
+      </div>
+    );
+  }
 
   return (
     <div className="mt-4 rounded-xl border border-sky-300/15 bg-sky-500/5 p-3 text-xs">
@@ -991,7 +1014,7 @@ export default function RoomPage() {
             ? {
                 ...entry,
                 menuStatus: discovery.sources.length > 0
-                  ? "loaded"
+                  ? "loading"
                   : "unavailable",
                 menuItemCount: 0,
                 orderingSources: discovery.sources,
@@ -1077,6 +1100,14 @@ export default function RoomPage() {
     const primarySource = sources[0];
     if (!primarySource) return;
 
+    setCandidates((current) =>
+      current.map((entry) =>
+        entry.id === candidate.id
+          ? { ...entry, menuStatus: "loading" }
+          : entry,
+      ),
+    );
+
     setCandidateMenus((current) => ({
       ...current,
       [candidate.id]: { status: "loading" },
@@ -1135,12 +1166,20 @@ export default function RoomPage() {
                 budgetEstimateCurrency: hasReliablePriceSample
                   ? data.priceSummary.currency ?? "USD"
                   : entry.googleBudgetEstimateCurrency,
+                menuStatus: "loaded",
                 menuItemCount: data.items.length,
               }
             : entry,
         ),
       );
     } catch (error) {
+      setCandidates((current) =>
+        current.map((entry) =>
+          entry.id === candidate.id
+            ? { ...entry, menuStatus: "loaded" }
+            : entry,
+        ),
+      );
       setCandidateMenus((current) => ({
         ...current,
         [candidate.id]: {
@@ -1637,11 +1676,10 @@ export default function RoomPage() {
       return b.totalScore - a.totalScore;
     });
 
-  const completedOrderingChecks = candidates.filter(
-    (candidate) =>
-      candidate.menuStatus === "loaded" ||
-      candidate.menuStatus === "unavailable",
-  ).length;
+  const completedOrderingChecks = candidates.filter((candidate) => {
+    const orderingState = candidateOrdering[candidate.id];
+    return orderingState?.status === "success" || orderingState?.status === "error";
+  }).length;
 
   const providerSurveySummary = summarizeProviderSurvey(providerSurvey);
   const providerInventory = providerSurveySummary.providers;

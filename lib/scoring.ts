@@ -71,6 +71,9 @@ export function evaluateBudgetScoreWithConfidence(
   minBudget: number,
   maxBudget: number,
 ): BudgetScoreEvaluation {
+  if (candidate.menuStatus === "pending" || candidate.menuStatus === "loading") {
+    return { score: null, status: "pending" };
+  }
   const restaurantMin = candidate.estimatedPriceMin;
   const restaurantMax = candidate.estimatedPriceMax;
   if (typeof restaurantMin !== "number" || typeof restaurantMax !== "number") {
