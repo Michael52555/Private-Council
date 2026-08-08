@@ -41,7 +41,9 @@ platforms and supported first-party chains such as Chick-fil-A, try up to three
 Google-listed sources in order and stop at the first reliable priced menu.
 For Chick-fil-A, a Google-listed location page is resolved through its
 `locationNumber` pickup link before the browser opens the store-specific ordering
-application; blocked static assets are ignored as non-menu diagnostics.
+application. If a direct request cannot read that page, the resolver repeats the
+same step against the browser-rendered HTML; blocked static assets are ignored as
+non-menu diagnostics.
 A successful menu can replace the Google fallback with a typical per-person
 meal estimate. The estimator classifies raw menu items into complete meals,
 mains, shared mains, small plates, sides, drinks, desserts, unit-priced items,

@@ -48,6 +48,23 @@ function mergeExtractions(
   return { items: [...itemsByIdentity.values()].slice(0, 750), methods };
 }
 
+function isChickFilAOrderingUrl(rawUrl: string): boolean {
+  try {
+    const hostname = new URL(rawUrl).hostname.toLowerCase();
+    return hostname === "order.chick-fil-a.com" || hostname.endsWith(".order.chick-fil-a.com");
+  } catch {
+    return false;
+  }
+}
+
+function sameUrl(left: string, right: string): boolean {
+  try {
+    return new URL(left).toString() === new URL(right).toString();
+  } catch {
+    return left === right;
+  }
+}
+
 export async function extractMenuFromSource(
   source: OrderingSource,
   context: { restaurantAddress?: string } = {},
@@ -91,10 +108,33 @@ export async function extractMenuFromSource(
     (extraction.items.length === 0 || adapter.captureNetworkJson)
   ) {
     try {
-      const rendered = await renderPublicPage(browserEntryUrl, {
+      let rendered = await renderPublicPage(browserEntryUrl, {
         adapterId: adapter.id,
         restaurantAddress: context.restaurantAddress,
       });
+      if (adapter.id === "chick_fil_a" && browserEntryUrl === source.url) {
+        const renderedSource = {
+          ...source,
+          url: rendered.finalUrl,
+        };
+        const renderedEntryUrl = providerOrderingEntryUrl(
+          rendered.html,
+          renderedSource,
+          adapter.id,
+        );
+        if (isChickFilAOrderingUrl(renderedEntryUrl)) {
+          warnings.push("Resolved the browser-rendered location page to its location-specific ordering application.");
+        }
+        if (
+          isChickFilAOrderingUrl(renderedEntryUrl) &&
+          !sameUrl(renderedEntryUrl, rendered.finalUrl)
+        ) {
+          rendered = await renderPublicPage(renderedEntryUrl, {
+            adapterId: adapter.id,
+            restaurantAddress: context.restaurantAddress,
+          });
+        }
+      }
       const providerJsonExtraction = extractProviderMenuFromJson(
         rendered.jsonPayloads,
         source,
