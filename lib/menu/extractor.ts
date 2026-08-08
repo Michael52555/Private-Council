@@ -5,6 +5,7 @@ import {
   type HtmlMenuExtraction,
 } from "@/lib/menu/html";
 import { menuAdapterForUrl } from "@/lib/menu/adapters";
+import { summarizeTypicalMealPrices } from "@/lib/menu/meal-estimate";
 import {
   extractProviderMenuFromHtml,
   extractProviderMenuFromJson,
@@ -154,39 +155,6 @@ export async function extractMenuFromSource(
   };
 }
 
-function summarizePrices(items: MenuItem[]): RestaurantMenuResult["priceSummary"] {
-  const pricedItems = items
-    .filter((item): item is MenuItem & { price: number } => typeof item.price === "number")
-    .sort((a, b) => a.price - b.price);
-
-  if (pricedItems.length === 0) {
-    return {
-      minimum: null,
-      maximum: null,
-      lowerQuartile: null,
-      upperQuartile: null,
-      median: null,
-      currency: null,
-    };
-  }
-
-  const middle = Math.floor(pricedItems.length / 2);
-  const median =
-    pricedItems.length % 2 === 0
-      ? (pricedItems[middle - 1].price + pricedItems[middle].price) / 2
-      : pricedItems[middle].price;
-  const currencies = pricedItems.map((item) => item.currency).filter(Boolean);
-
-  return {
-    minimum: pricedItems[0].price,
-    maximum: pricedItems[pricedItems.length - 1].price,
-    lowerQuartile: pricedItems[Math.floor((pricedItems.length - 1) * 0.25)].price,
-    upperQuartile: pricedItems[Math.floor((pricedItems.length - 1) * 0.75)].price,
-    median: Math.round(median * 100) / 100,
-    currency: (currencies[0] as string | undefined) ?? null,
-  };
-}
-
 export async function extractMenusWithFallback(
   sources: OrderingSource[],
   context: { restaurantAddress?: string } = {},
@@ -198,16 +166,15 @@ export async function extractMenusWithFallback(
   const menus: ExtractedMenu[] = [];
   for (const [sourceIndex, source] of sources.slice(0, 3).entries()) {
     const menu = await extractSource(source, context);
-    const pricedItemCount = menu.items.filter(
-      (item) => typeof item.price === "number",
-    ).length;
-    if (sourceIndex > 0 && pricedItemCount >= 3) {
+    const mealSummary = summarizeTypicalMealPrices(menu.items);
+    const hasReliablePriceSample = mealSummary.sampleItemCount >= 3;
+    if (sourceIndex > 0 && hasReliablePriceSample) {
       menu.warnings.unshift(
         `Fallback provider used after ${sourceIndex} higher-listed source${sourceIndex === 1 ? "" : "s"} returned no reliable menu prices.`,
       );
     }
     menus.push(menu);
-    if (pricedItemCount >= 3) break;
+    if (hasReliablePriceSample) break;
   }
   return menus;
 }
@@ -228,6 +195,6 @@ export async function extractRestaurantMenus(input: {
     restaurantName: input.restaurantName,
     menus,
     items,
-    priceSummary: summarizePrices(items),
+    priceSummary: summarizeTypicalMealPrices(items),
   };
 }

@@ -90,6 +90,9 @@ test("scores the budget only after menu-derived prices load", () => {
       estimatedPriceMin: 20,
       estimatedPriceMax: 50,
       pricePerPerson: 35,
+      budgetEstimateSource: "menu",
+      budgetEstimateConfidence: "high",
+      budgetEstimateCurrency: "USD",
       menuStatus: "loaded",
       menuItemCount: 20,
     }),
@@ -100,7 +103,7 @@ test("scores the budget only after menu-derived prices load", () => {
   assert.equal(score.totalScore, (1 + 25 / 30) / 2);
 });
 
-test("uses a Google budget fallback while exact menu prices remain unavailable", () => {
+test("marks a partially overlapping Google fallback as uncertain", () => {
   const score = evaluateRestaurantScore(
     candidate({
       estimatedPriceMin: 15,
@@ -120,7 +123,43 @@ test("uses a Google budget fallback while exact menu prices remain unavailable",
     preferences,
   );
 
-  assert.equal(score.breakdown[1].status, "ready");
-  assert.equal(score.breakdown[1].score, 15 / 25);
-  assert.equal(score.totalScore, (1 + 15 / 25) / 2);
+  assert.equal(score.breakdown[1].status, "uncertain");
+  assert.equal(score.breakdown[1].score, null);
+  assert.equal(score.totalScore, null);
+});
+
+test("uses Google fallback for clear within-budget and outside-budget decisions", () => {
+  const googleCandidate = candidate({
+    estimatedPriceMin: 10,
+    estimatedPriceMax: 20,
+    googleEstimatedPriceMin: 10,
+    googleEstimatedPriceMax: 20,
+    googleEstimatedPriceMidpoint: 15,
+    googleBudgetEstimateSource: "google_price_range",
+    googleBudgetEstimateConfidence: "medium",
+    googleBudgetEstimateCurrency: "USD",
+    budgetEstimateSource: "google_price_range",
+    budgetEstimateConfidence: "medium",
+    budgetEstimateCurrency: "USD",
+  });
+
+  const within = evaluateRestaurantScore(googleCandidate, preferences);
+  assert.equal(within.breakdown[1].status, "ready");
+  assert.equal(within.breakdown[1].score, 0);
+
+  const wideBudget = preferences.map((preference) => preference.category === "budget"
+    ? {
+        ...preference,
+        interpretation: {
+          ...preference.interpretation!,
+          structuredData: {
+            minPriceDollarsPerPerson: 0,
+            maxPriceDollarsPerPerson: 50,
+          },
+        },
+      }
+    : preference);
+  const covered = evaluateRestaurantScore(googleCandidate, wideBudget);
+  assert.equal(covered.breakdown[1].status, "ready");
+  assert.equal(covered.breakdown[1].score, 1);
 });

@@ -32,11 +32,17 @@ extraction:
    chosen from observed data.
 
 After candidate generation, two workers inspect all ten restaurants. Exact menu
-extraction remains optional: the registered provider adapters try up to three
-Google-listed sources in order and stop at the first reliable priced menu. A
-successful menu replaces the Google fallback with a high-confidence estimate;
-blocked or unrecognized menus leave the Google fallback intact. If neither
-source provides numeric prices, budget scoring remains pending.
+extraction then runs automatically: the registered provider adapters try up to
+three Google-listed sources in order and stop at the first reliable priced menu.
+A successful menu replaces the Google fallback with a high-confidence typical
+meal estimate. Meal estimation prefers combos, meals, plates, bowls, and other
+main dishes while excluding add-ons, sauces, drinks, sides, and family/catering
+packages when the menu provides enough structure.
+
+Blocked or unrecognized menus leave the Google fallback intact. Google ranges
+are used only for clear within-budget or outside-budget decisions; partial
+overlaps remain uncertain instead of producing a falsely precise percentage. If
+neither source provides numeric prices, budget scoring remains pending.
 
 ## Environment variables
 

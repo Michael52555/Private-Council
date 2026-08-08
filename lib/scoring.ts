@@ -12,8 +12,10 @@ export type PreferenceScore = {
 export type ScoreBreakdownItem = {
   category: "distance" | "budget";
   score: number | null;
-  status: "ready" | "pending";
+  status: "ready" | "pending" | "uncertain";
 };
+
+type BudgetScoreEvaluation = Pick<ScoreBreakdownItem, "score" | "status">;
 
 export type RestaurantScore = {
   totalScore: number | null;
@@ -64,6 +66,36 @@ export function evaluateBudgetScore(
   return overlap / (restaurantMax - restaurantMin);
 }
 
+export function evaluateBudgetScoreWithConfidence(
+  candidate: RestaurantCandidate,
+  minBudget: number,
+  maxBudget: number,
+): BudgetScoreEvaluation {
+  const restaurantMin = candidate.estimatedPriceMin;
+  const restaurantMax = candidate.estimatedPriceMax;
+  if (typeof restaurantMin !== "number" || typeof restaurantMax !== "number") {
+    return { score: null, status: "pending" };
+  }
+  if (candidate.budgetEstimateSource === "unavailable") {
+    return { score: null, status: "pending" };
+  }
+
+  if (candidate.budgetEstimateSource === "menu") {
+    return {
+      score: evaluateBudgetScore(candidate, minBudget, maxBudget),
+      status: "ready",
+    };
+  }
+
+  if (restaurantMax < minBudget || restaurantMin > maxBudget) {
+    return { score: 0, status: "ready" };
+  }
+  if (restaurantMin >= minBudget && restaurantMax <= maxBudget) {
+    return { score: 1, status: "ready" };
+  }
+  return { score: null, status: "uncertain" };
+}
+
 function isConfirmed(preference: Preference | undefined): boolean {
   return Boolean(
     preference?.interpretation?.status === "success" &&
@@ -97,17 +129,17 @@ export function evaluateRestaurantScore(
   const maxBudget =
     budgetPreference?.interpretation?.structuredData
       .maxPriceDollarsPerPerson;
-  const budgetScore =
+  const budgetEvaluation: BudgetScoreEvaluation | undefined =
     isConfirmed(budgetPreference) &&
     typeof minBudget === "number" &&
     typeof maxBudget === "number"
-      ? evaluateBudgetScore(
+      ? evaluateBudgetScoreWithConfidence(
           candidate,
           minBudget,
           maxBudget,
         )
       : budgetPreference
-        ? null
+        ? { score: null, status: "pending" }
         : undefined;
 
   const breakdown: ScoreBreakdownItem[] = [];
@@ -135,17 +167,14 @@ export function evaluateRestaurantScore(
   if (budgetPreference) {
     breakdown.push({
       category: "budget",
-      score: budgetScore ?? null,
-      status:
-        typeof budgetScore === "number"
-          ? "ready"
-          : "pending",
+      score: budgetEvaluation?.score ?? null,
+      status: budgetEvaluation?.status ?? "pending",
     });
 
-    if (typeof budgetScore === "number") {
+    if (typeof budgetEvaluation?.score === "number") {
       scores.push({
         category: "budget",
-        score: budgetScore,
+        score: budgetEvaluation.score,
         weight: importanceWeight(
           budgetPreference.importance,
         ),
@@ -153,11 +182,11 @@ export function evaluateRestaurantScore(
     }
   }
 
-  const hasPendingRequiredScore =
-    breakdown.some((item) => item.status === "pending");
+  const hasUnresolvedRequiredScore =
+    breakdown.some((item) => item.status !== "ready");
 
   return {
-    totalScore: hasPendingRequiredScore
+    totalScore: hasUnresolvedRequiredScore
       ? null
       : combineScores(scores),
     breakdown,

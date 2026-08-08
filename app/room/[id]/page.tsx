@@ -325,6 +325,8 @@ function PrimaryMenuPanel({ state }: { state?: CandidateMenuState }) {
     (item): item is MenuItem & { price: number } =>
       typeof item.price === "number",
   );
+  const sampleItemIds = new Set(state.result.priceSummary.sampleItemIds);
+  const typicalMealItems = pricedItems.filter((item) => sampleItemIds.has(item.id));
   const effectiveMenuIndex = state.result.menus.findIndex(
     (candidateMenu) => candidateMenu.items.filter(
       (item) => typeof item.price === "number",
@@ -349,18 +351,21 @@ function PrimaryMenuPanel({ state }: { state?: CandidateMenuState }) {
         </span>
       </div>
       <p className="mt-2 text-[10px] text-gray-500">
-        Extraction: {menu?.extractionMethod ?? "none"}
+        Extraction: {menu?.extractionMethod ?? "none"} · basis: {state.result.priceSummary.basis.replaceAll("_", " ")}
+        {state.result.priceSummary.excludedItemCount > 0
+          ? ` · ${state.result.priceSummary.excludedItemCount} non-meal items excluded`
+          : ""}
       </p>
-      {pricedItems.length >= 3 && (
+      {state.result.priceSummary.sampleItemCount >= 3 && (
         <p className="mt-2 text-emerald-100">
-          Typical item quartiles: ${state.result.priceSummary.lowerQuartile?.toFixed(2)}–$
+          Typical meal estimate: ${state.result.priceSummary.lowerQuartile?.toFixed(2)}–$
           {state.result.priceSummary.upperQuartile?.toFixed(2)} · median $
           {state.result.priceSummary.median?.toFixed(2)}
         </p>
       )}
-      {pricedItems.length > 0 && (
+      {typicalMealItems.length > 0 && (
         <ul className="mt-3 space-y-1 text-gray-300">
-          {pricedItems.slice(0, 8).map((item) => (
+          {typicalMealItems.slice(0, 8).map((item) => (
             <li key={item.id} className="flex justify-between gap-3">
               <span className="truncate">{item.name}</span>
               <span className="shrink-0">${item.price.toFixed(2)}</span>
@@ -384,7 +389,7 @@ function BudgetEstimatePanel({ candidate }: { candidate: RestaurantCandidate }) 
   const maximum = candidate.estimatedPriceMax;
   const hasRange = typeof minimum === "number" && typeof maximum === "number";
   const sourceLabel = candidate.budgetEstimateSource === "menu"
-    ? "Menu-derived item range"
+    ? "Menu-derived typical meal range"
     : candidate.budgetEstimateSource === "google_price_range"
       ? "Google price range"
       : candidate.budgetEstimateSource === "google_price_level"
@@ -846,6 +851,14 @@ export default function RoomPage() {
             : entry,
         ),
       );
+
+      if (discovery.sources.length > 0) {
+        await handleExtractPrimaryMenu(
+          { ...candidate, orderingSources: discovery.sources },
+          discovery.sources,
+          enrichmentRun,
+        );
+      }
     } catch (error) {
       if (enrichmentRun !== orderingDiscoveryRunRef.current) {
         return;
@@ -902,8 +915,18 @@ export default function RoomPage() {
     await Promise.all([worker(), worker()]);
   }
 
-  async function handleExtractPrimaryMenu(candidate: RestaurantCandidate) {
-    const primarySource = candidate.orderingSources[0];
+  async function handleExtractPrimaryMenu(
+    candidate: RestaurantCandidate,
+    sources = candidate.orderingSources,
+    enrichmentRun?: number,
+  ) {
+    if (
+      typeof enrichmentRun === "number" &&
+      enrichmentRun !== orderingDiscoveryRunRef.current
+    ) {
+      return;
+    }
+    const primarySource = sources[0];
     if (!primarySource) return;
 
     setCandidateMenus((current) => ({
@@ -919,7 +942,7 @@ export default function RoomPage() {
           placeId: candidate.id,
           restaurantName: candidate.name,
           restaurantAddress: candidate.address,
-          sources: candidate.orderingSources.slice(0, 3),
+          sources: sources.slice(0, 3),
         }),
       });
       const data = (await response.json()) as RestaurantMenuApiResponse;
@@ -928,16 +951,19 @@ export default function RoomPage() {
           "error" in data ? data.error : "Could not extract the primary menu.",
         );
       }
+      if (
+        typeof enrichmentRun === "number" &&
+        enrichmentRun !== orderingDiscoveryRunRef.current
+      ) {
+        return;
+      }
 
       setCandidateMenus((current) => ({
         ...current,
         [candidate.id]: { status: "success", result: data },
       }));
 
-      const pricedItemCount = data.items.filter(
-        (item) => typeof item.price === "number",
-      ).length;
-      const hasReliablePriceSample = pricedItemCount >= 3;
+      const hasReliablePriceSample = data.priceSummary.sampleItemCount >= 3;
       setCandidates((current) =>
         current.map((entry) =>
           entry.id === candidate.id
@@ -2188,7 +2214,9 @@ export default function RoomPage() {
                                       "
                                       >
                                           {totalScore === null
-                                            ? "Score pending"
+                                            ? breakdown.some((item) => item.status === "uncertain")
+                                              ? "Score uncertain"
+                                              : "Score pending"
                                             : `Score ${Math.round(totalScore * 100)}%`}
                                       </span>
                                   </div>
@@ -2214,7 +2242,7 @@ export default function RoomPage() {
 
                                           <span>
                                               {item.score === null
-                                                ? "pending"
+                                                ? item.status
                                                 : `${Math.round(item.score * 100)}%`}
                                           </span>
                                       </div>

@@ -93,5 +93,9 @@ export type RestaurantMenuResult = {
     upperQuartile: number | null;
     median: number | null;
     currency: string | null;
+    basis: "explicit_meals" | "filtered_menu_items" | "all_priced_items" | "none";
+    sampleItemCount: number;
+    excludedItemCount: number;
+    sampleItemIds: string[];
   };
 };
