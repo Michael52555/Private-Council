@@ -49,7 +49,7 @@ export async function POST(request: Request) {
 
     let cachedMenu: ReturnType<typeof readMenuCache> = { status: "miss" };
     try {
-      cachedMenu = readMenuCache(placeId);
+      cachedMenu = readMenuCache(placeId, sources);
     } catch (cacheError) {
       console.warn("Menu cache read failed; continuing without cache:", cacheError);
     }
@@ -79,7 +79,7 @@ export async function POST(request: Request) {
 
     const result = await runSingleFlight(`menu:${placeId}`, async () => {
       try {
-        const cacheRecheck = readMenuCache(placeId);
+        const cacheRecheck = readMenuCache(placeId, sources);
         if (cacheRecheck.status === "success") return cacheRecheck.result;
       } catch (cacheError) {
         console.warn("Menu cache recheck failed:", cacheError);

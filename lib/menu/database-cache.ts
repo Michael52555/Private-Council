@@ -13,6 +13,7 @@ import {
 
 const orderingSchemaVersion = 2;
 export const menuSchemaVersion = 1;
+const menuAttemptVersion = 2;
 const orderingSuccessLifetimeMs = 14 * 24 * 60 * 60 * 1000;
 const orderingEmptyLifetimeMs = 30 * 60 * 1000;
 const failureRetryMs = 3 * 60 * 60 * 1000;
@@ -107,10 +108,11 @@ function normalizeHostname(source: OrderingSource): string {
 }
 
 export function menuSourceFingerprint(sources: OrderingSource[]): string {
-  return sources
+  const providers = sources
     .slice(0, 3)
     .map((source) => `${source.provider}:${normalizeHostname(source)}`)
     .join("|");
+  return `attempt-v${menuAttemptVersion}|${providers}`;
 }
 
 export function readOrderingDiscoveryCache(
@@ -156,19 +158,36 @@ export function storeOrderingDiscoveryCache(
   );
 }
 
-export function readMenuCache(placeId: string): MenuCacheLookup {
+export function readMenuCache(
+  placeId: string,
+  sources?: OrderingSource[],
+): MenuCacheLookup {
   const row = database().prepare(`
-    SELECT status, result_json, failure_reason, stored_at, retry_after
+    SELECT status, source_fingerprint, result_json, failure_reason, stored_at, retry_after
     FROM restaurant_menu_cache
     WHERE place_id = ? AND schema_version = ?
   `).get(placeId, menuSchemaVersion) as Record<string, unknown> | undefined;
 
   if (!row) return { status: "miss" };
+  const currentSourceFingerprint = sources
+    ? menuSourceFingerprint(sources)
+    : null;
+  const failureMatchesCurrentSources =
+    currentSourceFingerprint === null ||
+    row.source_fingerprint === currentSourceFingerprint;
   if (row.status === "success") {
     const result = parseJson<RestaurantMenuResult>(row.result_json);
     if (result && typeof row.stored_at === "string") {
       const currentResult = withCurrentPriceEstimate(result);
       if (!hasReliableMealEstimate(currentResult.priceSummary)) {
+        if (!failureMatchesCurrentSources) {
+          database().prepare(`
+            UPDATE restaurant_menu_cache
+            SET failure_reason = NULL, retry_after = NULL
+            WHERE place_id = ? AND schema_version = ? AND status = 'success'
+          `).run(placeId, menuSchemaVersion);
+          return { status: "miss" };
+        }
         if (
           typeof row.retry_after === "string" &&
           Date.parse(row.retry_after) > Date.now()
@@ -194,6 +213,13 @@ export function readMenuCache(placeId: string): MenuCacheLookup {
         storedAt: row.stored_at,
       };
     }
+    return { status: "miss" };
+  }
+  if (row.status === "failure" && !failureMatchesCurrentSources) {
+    database().prepare(`
+      DELETE FROM restaurant_menu_cache
+      WHERE place_id = ? AND schema_version = ? AND status = 'failure'
+    `).run(placeId, menuSchemaVersion);
     return { status: "miss" };
   }
   if (

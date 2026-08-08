@@ -40,6 +40,21 @@ test("menu source fingerprint records provider changes for diagnostics", () => {
   assert.notEqual(menuSourceFingerprint([doorDash]), menuSourceFingerprint([toast]));
 });
 
+test("invalidates a negative menu cache when the provider inputs change", () => {
+  const doorDash = source("https://doordash.com/store/negative", "doordash");
+  const toast = source("https://order.toasttab.com/online/negative", "toast");
+
+  storeMenuFailure("place-provider-change", [doorDash], "DoorDash was blocked.");
+  assert.equal(
+    readMenuCache("place-provider-change", [doorDash]).status,
+    "recent_failure",
+  );
+  assert.equal(
+    readMenuCache("place-provider-change", [toast]).status,
+    "miss",
+  );
+});
+
 test("the central database keeps the first reliable menu result", () => {
   const orderingSource = source("https://doordash.com/store/123", "doordash");
   const result = (median: number): RestaurantMenuResult => ({

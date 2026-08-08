@@ -77,7 +77,10 @@ each participant's browser. The API routes use a shared SQLite database at
   reliable estimate remains eligible for another provider attempt. The first
   reliable result for the current menu schema is then reused permanently.
 - Failed or price-less menu attempts are cached for three hours so many local
-  agents do not repeatedly hit the same blocked provider.
+  agents do not repeatedly hit the same blocked provider. Negative entries are
+  versioned and fingerprinted by their provider inputs, so a changed adapter or
+  provider list invalidates only the affected failures without deleting useful
+  menu data.
 - Incrementing `menuSchemaVersion` starts a clean generation when the extraction
   or meal-estimation algorithm changes.
 
