@@ -540,7 +540,8 @@ function OrderingSourcesPanel({ state }: { state: CandidateOrderingState }) {
 }
 
 function BudgetEstimatePanel({ candidate }: { candidate: RestaurantCandidate }) {
-  const isCheckingMenu = candidate.menuStatus === "pending" || candidate.menuStatus === "loading";
+  const isQueuedForMenu = candidate.menuStatus === "pending";
+  const isCheckingMenu = candidate.menuStatus === "loading";
   const minimum = candidate.estimatedPriceMin;
   const maximum = candidate.estimatedPriceMax;
   const hasRange = typeof minimum === "number" && typeof maximum === "number";
@@ -561,15 +562,17 @@ function BudgetEstimatePanel({ candidate }: { candidate: RestaurantCandidate }) 
     ? "$"
     : `${candidate.budgetEstimateCurrency} `;
 
-  if (isCheckingMenu) {
+  if (isQueuedForMenu || isCheckingMenu) {
     return (
       <div className="mt-4 rounded-xl border border-sky-300/15 bg-sky-500/5 p-3 text-xs" aria-live="polite">
         <div className="flex items-center gap-2 font-semibold text-sky-200">
           <span className="h-2 w-2 animate-pulse rounded-full bg-sky-300" />
-          Checking menu prices...
+          {isQueuedForMenu ? "Queued for price check..." : "Checking menu prices..."}
         </div>
         <p className="mt-2 text-[10px] leading-4 text-gray-500">
-          A Google estimate will appear only if reliable menu prices cannot be extracted.
+          {isQueuedForMenu
+            ? "Waiting for a central scraper worker; cached restaurants bypass this queue."
+            : "A Google estimate will appear only if reliable menu prices cannot be extracted."}
         </p>
       </div>
     );
