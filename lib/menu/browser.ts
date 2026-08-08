@@ -1007,10 +1007,9 @@ export async function discoverGoogleOrderingLinks(
       ),
     );
 
-    const providerControls =
-      !primarySelectedLink && navigationCandidates.length === 0
-        ? await findProviderControls(orderingPage, new Set(visibleControlLabels))
-        : [];
+    const providerControls = !primarySelectedLink
+      ? await findProviderControls(orderingPage, new Set(visibleControlLabels))
+      : [];
     const primaryProviderControl = providerControls.find((candidate) =>
       Boolean(majorProviderAdapterForControlLabel(candidate.label)),
     );
