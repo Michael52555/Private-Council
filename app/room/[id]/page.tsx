@@ -20,9 +20,6 @@ import type {
 import {
   orderingSourceHostname,
   orderingSourceInventoryLabel,
-  summarizeProviderSurvey,
-  upsertProviderSurveyObservation,
-  type ProviderSurveyObservation,
 } from "@/lib/menu/survey";
 
 import {
@@ -134,8 +131,6 @@ type CandidateMenuState =
   | { status: "loading" }
   | { status: "success"; result: RestaurantMenuResult }
   | { status: "error"; error: string };
-
-const providerSurveyStorageKey = "glued:restaurant-provider-survey:v1";
 
 type DistanceEvaluation =
   | {
@@ -311,6 +306,8 @@ function PlanningBackground() {
   );
 }
 
+// Retained as an internal diagnostic renderer, but intentionally excluded from the user UI.
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function PrimaryMenuPanel({ state }: { state?: CandidateMenuState }) {
   if (!state || state.status === "loading") return null;
   if (state.status === "error") {
@@ -397,6 +394,8 @@ function PrimaryMenuPanel({ state }: { state?: CandidateMenuState }) {
   );
 }
 
+// Retained as an internal diagnostic renderer, but intentionally excluded from the user UI.
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function OrderingSourcesPanel({ state }: { state: CandidateOrderingState }) {
   const primarySource = state.sources[0];
   const technicalDetailCount =
@@ -677,17 +676,12 @@ export default function RoomPage() {
   const [candidateGenerationError, setCandidateGenerationError] =
   useState("");
 
-  const [candidateOrdering, setCandidateOrdering] = useState<
+  const [, setCandidateOrdering] = useState<
     Record<string, CandidateOrderingState>
   >({});
-  const [candidateMenus, setCandidateMenus] = useState<
+  const [, setCandidateMenus] = useState<
     Record<string, CandidateMenuState>
   >({});
-  const [providerSurvey, setProviderSurvey] = useState<
-    ProviderSurveyObservation[]
-  >([]);
-  const [providerSurveyLoaded, setProviderSurveyLoaded] = useState(false);
-
   const orderingDiscoveryRunRef = useRef(0);
 
   const [privateOriginAddress, setPrivateOriginAddress] =
@@ -788,46 +782,6 @@ export default function RoomPage() {
     setHasLoaded(true);
     setSaveStatus("saved");
   }, [storageKey]);
-
-  useEffect(() => {
-    try {
-      const savedSurvey = window.localStorage.getItem(providerSurveyStorageKey);
-      if (savedSurvey) {
-        const parsed = JSON.parse(savedSurvey) as unknown;
-        if (Array.isArray(parsed)) {
-          setProviderSurvey(
-            parsed.filter((entry): entry is ProviderSurveyObservation => {
-              if (typeof entry !== "object" || entry === null) return false;
-              const observation = entry as Partial<ProviderSurveyObservation>;
-              return (
-                typeof observation.placeId === "string" &&
-                typeof observation.restaurantName === "string" &&
-                typeof observation.address === "string" &&
-                typeof observation.observedAt === "string" &&
-                (observation.primarySource === null ||
-                  (typeof observation.primarySource === "object" &&
-                    typeof observation.primarySource.url === "string"))
-              );
-            }),
-          );
-        }
-      }
-    } catch (error) {
-      console.error("Could not load provider survey:", error);
-    } finally {
-      setProviderSurveyLoaded(true);
-    }
-  }, []);
-
-  useEffect(() => {
-    if (!providerSurveyLoaded) return;
-    window.localStorage.setItem(
-      providerSurveyStorageKey,
-      JSON.stringify(providerSurvey),
-    );
-  }, [providerSurvey, providerSurveyLoaded]);
-
-  
 
   // Automatically save changes after a short delay.
   useEffect(() => {
@@ -997,16 +951,6 @@ export default function RoomPage() {
           diagnostics: discovery.diagnostics,
         },
       }));
-
-      setProviderSurvey((current) =>
-        upsertProviderSurveyObservation(current, {
-          placeId: candidate.id,
-          restaurantName: candidate.name,
-          address: candidate.address,
-          primarySource: discovery.sources[0] ?? null,
-          observedAt: new Date().toISOString(),
-        }),
-      );
 
       setCandidates((current) =>
         current.map((entry) =>
@@ -1191,10 +1135,6 @@ export default function RoomPage() {
         },
       }));
     }
-  }
-
-  function handleClearProviderSurvey() {
-    setProviderSurvey([]);
   }
 
   function updateDraft<K extends keyof PreferenceDraft>(
@@ -1676,15 +1616,6 @@ export default function RoomPage() {
       return b.totalScore - a.totalScore;
     });
 
-  const completedOrderingChecks = candidates.filter((candidate) => {
-    const orderingState = candidateOrdering[candidate.id];
-    return orderingState?.status === "success" || orderingState?.status === "error";
-  }).length;
-
-  const providerSurveySummary = summarizeProviderSurvey(providerSurvey);
-  const providerInventory = providerSurveySummary.providers;
-
-
   if (!hasLoaded) {
     return (
       <main className="room-page">
@@ -2076,7 +2007,7 @@ export default function RoomPage() {
                                 </h2>
 
                                 <p className="mt-2 max-w-xl text-sm leading-6 text-gray-400">
-                                Inspecting the ordering providers exposed by each Google Maps listing.
+                                Ranked using your confirmed preferences.
                                 </p>
                             </div>
 
@@ -2084,12 +2015,6 @@ export default function RoomPage() {
                                 <span className="rounded-full border border-white/10 bg-white/10 px-3 py-1 text-sm font-semibold text-gray-200">
                                     {candidates.length} options
                                 </span>
-
-                                {candidates.length > 0 && (
-                                  <span className="rounded-full border border-white/10 bg-white/10 px-3 py-1 text-sm font-semibold text-gray-200">
-                                    {completedOrderingChecks}/{candidates.length} ordering sources checked
-                                  </span>
-                                )}
 
                                 <button
                                     type="button"
@@ -2115,41 +2040,6 @@ export default function RoomPage() {
 
                             
                             </div>
-
-                            {providerSurveySummary.checkedRestaurantCount > 0 && (
-                              <div className="mt-5 rounded-2xl border border-purple-300/15 bg-purple-500/10 p-4">
-                                <div className="flex items-start justify-between gap-4">
-                                  <div>
-                                    <p className="text-xs font-semibold uppercase tracking-[0.18em] text-purple-200">
-                                      Primary provider survey
-                                    </p>
-                                    <p className="mt-1 text-xs leading-5 text-gray-400">
-                                      Each restaurant contributes only its first valid Google Maps ordering provider. Results persist across searches on this device.
-                                    </p>
-                                  </div>
-                                  <button
-                                    type="button"
-                                    onClick={handleClearProviderSurvey}
-                                    className="shrink-0 rounded-lg border border-white/10 px-2 py-1 text-[10px] text-gray-400 transition hover:bg-white/10 hover:text-gray-200"
-                                  >
-                                    Clear survey
-                                  </button>
-                                </div>
-                                <p className="mt-3 text-xs text-gray-300">
-                                  {providerSurveySummary.checkedRestaurantCount} restaurants checked · {providerSurveySummary.restaurantWithSourceCount} resolved · {providerSurveySummary.coveragePercent}% source coverage
-                                </p>
-                                <div className="mt-3 flex flex-wrap gap-2">
-                                  {providerInventory.map((provider) => (
-                                    <span
-                                      key={provider.label}
-                                      className="rounded-full border border-white/10 bg-black/20 px-3 py-1 text-xs text-gray-200"
-                                    >
-                                      {provider.label} · {provider.restaurantCount} · {provider.shareOfResolvedPercent}%
-                                    </span>
-                                  ))}
-                                </div>
-                              </div>
-                            )}
 
                             {!confirmedDistancePreference ? (
                             <div className="mt-6 rounded-2xl border border-dashed border-white/15 bg-white/5 px-6 py-10 text-center">
@@ -2188,19 +2078,18 @@ export default function RoomPage() {
                                         {index + 1}
                                         </span>
 
-                                        <span className="rounded-full bg-white/10 px-3 py-1 text-xs font-semibold text-gray-200">
-                                        {candidate.distanceMiles} miles
-                                        </span>
-
-                                        <p className="mt-1 text-sm text-gray-400">
-                                          {candidate.menuStatus === "loaded"
-                                            ? "Primary Google ordering source found"
-                                            : candidate.menuStatus === "unavailable"
-                                              ? "No Google ordering source found"
-                                              : candidate.menuStatus === "loading"
-                                                ? "Inspecting Google Maps..."
-                                                : "Queued for source discovery..."}
-                                        </p>
+                                        <div className="flex flex-wrap justify-end gap-2">
+                                          <span className="rounded-full bg-purple-500/20 px-3 py-1 text-xs font-semibold text-purple-200">
+                                            {totalScore === null
+                                              ? breakdown.some((item) => item.status === "uncertain")
+                                                ? "Score uncertain"
+                                                : "Score pending"
+                                              : `Score ${Math.round(totalScore * 100)}%`}
+                                          </span>
+                                          <span className="rounded-full bg-white/10 px-3 py-1 text-xs font-semibold text-gray-200">
+                                            {candidate.distanceMiles} miles
+                                          </span>
+                                        </div>
                                     </div>
 
                                     <h3 className="mt-5 text-lg font-semibold text-white">
@@ -2212,118 +2101,6 @@ export default function RoomPage() {
                                     </p>
 
                                     <BudgetEstimatePanel candidate={candidate} />
-
-                                    <div className="mt-4 flex flex-wrap gap-2">
-                                      <button
-                                        type="button"
-                                        onClick={() => handleDiscoverOrderingSources(candidate)}
-                                        disabled={
-                                          candidate.menuStatus === "pending" ||
-                                          candidate.menuStatus === "loading"
-                                        }
-                                        className="rounded-xl border border-purple-300/20 bg-purple-500/15 px-3 py-2 text-xs font-semibold text-purple-100 transition hover:bg-purple-500/25 disabled:cursor-wait disabled:opacity-60"
-                                      >
-                                        {candidate.menuStatus === "pending"
-                                          ? "Source check queued"
-                                          : candidateOrdering[candidate.id]?.status === "loading"
-                                            ? "Inspecting Google Maps..."
-                                          : candidateOrdering[candidate.id]?.status === "success"
-                                            ? "Refresh sources"
-                                            : "Retry source discovery"}
-                                      </button>
-
-                                      {candidate.googleMapsUri && (
-                                        <a
-                                          href={candidate.googleMapsUri}
-                                          target="_blank"
-                                          rel="noreferrer"
-                                          className="rounded-xl border border-white/10 px-3 py-2 text-xs font-semibold text-gray-300 transition hover:bg-white/10"
-                                        >
-                                          Google Maps ↗
-                                        </a>
-                                      )}
-
-                                      {candidate.orderingSources[0] && (
-                                        <button
-                                          type="button"
-                                          onClick={() => handleExtractPrimaryMenu(candidate)}
-                                          disabled={candidateMenus[candidate.id]?.status === "loading"}
-                                          className="rounded-xl border border-emerald-300/20 bg-emerald-500/10 px-3 py-2 text-xs font-semibold text-emerald-100 transition hover:bg-emerald-500/20 disabled:cursor-wait disabled:opacity-60"
-                                        >
-                                          {candidateMenus[candidate.id]?.status === "loading"
-                                            ? "Scraping primary menu..."
-                                            : candidateMenus[candidate.id]?.status === "success"
-                                              ? "Refresh primary menu"
-                                              : "Scrape primary menu"}
-                                        </button>
-                                      )}
-                                    </div>
-
-                                    {candidateOrdering[candidate.id]?.status === "error" && (
-                                      <p className="mt-3 text-xs leading-5 text-red-300">
-                                        {candidateOrdering[candidate.id].error}
-                                      </p>
-                                    )}
-
-                                    {candidateOrdering[candidate.id]?.status === "success" && (
-                                      <OrderingSourcesPanel state={candidateOrdering[candidate.id]} />
-                                    )}
-
-                                    <PrimaryMenuPanel state={candidateMenus[candidate.id]} />
-
-                                    <div className="mt-5">
-                                      <span
-                                      className="
-                                      inline-flex
-                                      rounded-full
-                                      bg-purple-500/20
-                                      px-3
-                                      py-1
-                                      text-xs
-                                      font-semibold
-                                      text-purple-200
-                                      "
-                                      >
-                                          {totalScore === null
-                                            ? breakdown.some((item) => item.status === "uncertain")
-                                              ? "Score uncertain"
-                                              : "Score pending"
-                                            : `Score ${Math.round(totalScore * 100)}%`}
-                                      </span>
-                                  </div>
-
-                                  <div className="mt-4 space-y-2">
-                                  {
-                                  breakdown.map((item)=>(
-                                      <div
-                                      key={item.category}
-                                      className="
-                                      flex
-                                      justify-between
-                                      text-sm
-                                      text-gray-300
-                                      "
-                                      >
-                                          <span>
-                                              {item.category}
-                                              {item.category === "budget" && candidate.budgetEstimateConfidence !== "none"
-                                                ? ` · ${candidate.budgetEstimateConfidence} confidence`
-                                                : ""}
-                                          </span>
-
-                                          <span>
-                                              {item.score === null
-                                                ? item.status
-                                                : `${Math.round(item.score * 100)}%`}
-                                          </span>
-                                      </div>
-                                  ))
-                                  }
-                                  </div>
-
-                                    <p className="mt-4 text-xs text-gray-500">
-                                        Evaluated privately on this device
-                                    </p>
                                     </article>
                                 ),
                                 )}

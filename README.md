@@ -5,6 +5,9 @@ restaurant candidates without exposing the underlying reasons.
 
 ## Local development
 
+Node.js 22.5 or newer is required because the central cache uses Node&apos;s
+built-in SQLite module.
+
 ```bash
 npm install
 cp .env.example .env.local
@@ -26,10 +29,9 @@ extraction:
    listing, targets its **Online ordering** control, and returns only provider
    URLs exposed by that interaction. The ordinary restaurant website is
    returned separately as an explicitly uncounted fallback.
-3. The candidate lab lists each provider, domain, final URL, discovery method,
-   unresolved controls, and every warning. It also aggregates provider counts
-   across the current ten restaurants so the next extraction adapters can be
-   chosen from observed data.
+3. Provider URLs, scraper diagnostics, and raw menu items remain central-model
+   implementation details. The candidate interface shows only the restaurant,
+   score, distance, and estimated per-person price.
 
 After candidate generation, two workers inspect all ten restaurants. Exact menu
 extraction then runs automatically: the registered provider adapters try up to
@@ -44,6 +46,26 @@ are used only for clear within-budget or outside-budget decisions; partial
 overlaps remain uncertain instead of producing a falsely precise percentage. If
 neither source provides numeric prices, budget scoring remains pending.
 
+## Central restaurant cache
+
+Ordering discovery and menu extraction are cached on the server rather than in
+each participant's browser. The API routes use a shared SQLite database at
+`.data/restaurant-cache.sqlite` by default:
+
+- Google ordering-source discovery is cached for 14 days.
+- The first reliable menu result for a Google place ID is stored permanently
+  for the current menu schema version.
+- Failed or price-less menu attempts are cached for three hours so many local
+  agents do not repeatedly hit the same blocked provider.
+- Incrementing `menuSchemaVersion` starts a clean generation when the extraction
+  or meal-estimation algorithm changes.
+
+The SQLite file belongs to the central service, so all local agents connected to
+that service reuse the same restaurant data. In a hosted environment,
+`RESTAURANT_CACHE_DB_PATH` must point to a persistent volume. A future Postgres
+adapter can replace SQLite behind the same cache boundary when the central model
+runs across multiple server instances.
+
 ## Environment variables
 
 Required:
@@ -55,6 +77,11 @@ Optional browser configuration (choose one):
 
 - `PLAYWRIGHT_WS_ENDPOINT`: a remote Chromium CDP WebSocket endpoint.
 - `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH`: an installed local Chromium binary.
+
+Optional central cache configuration:
+
+- `RESTAURANT_CACHE_DB_PATH`: persistent SQLite path. Defaults to
+  `.data/restaurant-cache.sqlite` for local development.
 
 During local development, an installed macOS/Windows/Linux Chrome or Chromium is
 detected automatically. In a hosted environment, set `PLAYWRIGHT_WS_ENDPOINT`.
