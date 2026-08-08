@@ -47,8 +47,9 @@ Blocked or unrecognized menus leave the Google fallback intact. Budget
 compatibility is continuous: it combines the representative meal price with
 the overlap between the restaurant and requested ranges. Google numeric ranges
 receive less scoring weight than menu data, and coarse Google price levels
-receive still less. If neither source provides numeric prices, the UI shows a
-partial score from the preferences that can be evaluated.
+receive still less. If neither source provides numeric prices, the overall
+score remains pending and the UI reports how many preferences have enough
+evidence; it does not present a distance-only result as a complete score.
 
 ## Central restaurant cache
 
