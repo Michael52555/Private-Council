@@ -57,6 +57,7 @@ export async function POST(request: Request) {
         sourceCount: freshResult.sources.length,
         providers: freshResult.sources.map((source) => source.provider),
         orderControlFound: freshResult.diagnostics.orderControlFound,
+        deliveryModeActivated: freshResult.diagnostics.deliveryModeActivated,
         resultScope: freshResult.diagnostics.resultScope,
         warnings: freshResult.warnings,
       });

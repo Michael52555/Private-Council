@@ -1,12 +1,21 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  isDeliveryOrderingModeLabel,
   providerStartUrl,
   scoreGoogleOrderControlLabel,
   selectFirstSupportedOrderingLink,
   selectGoogleOrderingLinkCandidates,
   selectSupportedOrderingLinks,
 } from "@/lib/menu/browser";
+
+test("recognizes English and Chinese delivery mode labels", () => {
+  assert.equal(isDeliveryOrderingModeLabel("Delivery"), true);
+  assert.equal(isDeliveryOrderingModeLabel("外送"), true);
+  assert.equal(isDeliveryOrderingModeLabel("外卖"), true);
+  assert.equal(isDeliveryOrderingModeLabel("× 自取"), false);
+  assert.equal(isDeliveryOrderingModeLabel("Pickup"), false);
+});
 
 test("starts Panda location discovery on the restaurant city page", () => {
   assert.equal(

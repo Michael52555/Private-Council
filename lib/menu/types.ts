@@ -34,6 +34,7 @@ export type OrderingDiscoveryDiagnostics = {
   orderControlLabel?: string;
   orderControlLayout?: "desktop" | "mobile";
   orderingSurface?: "same_page" | "new_page";
+  deliveryModeActivated?: boolean;
   finalGoogleMapsUrl?: string;
   pageTitle?: string;
   consentHandled: boolean;

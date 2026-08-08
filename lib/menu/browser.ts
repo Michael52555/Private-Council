@@ -670,51 +670,81 @@ async function collectPageLinks(page: Page): Promise<LinkCandidate[]> {
   return links;
 }
 
+const deliveryOrderingModeText = /^(?:delivery|外送|外卖|送餐)$/i;
+
+export function isDeliveryOrderingModeLabel(label: string): boolean {
+  return deliveryOrderingModeText.test(
+    label.replace(/[×✕]/g, "").replace(/\s+/g, " ").trim(),
+  );
+}
+
+async function activateDeliveryOrderingMode(
+  page: Page,
+  surface: Locator,
+): Promise<boolean> {
+  const roleCandidates = surface
+    .getByRole("button", { name: deliveryOrderingModeText })
+    .or(surface.getByRole("tab", { name: deliveryOrderingModeText }))
+    .or(surface.getByRole("radio", { name: deliveryOrderingModeText }));
+  const roleCount = Math.min(await roleCandidates.count().catch(() => 0), 8);
+  for (let index = 0; index < roleCount; index += 1) {
+    const candidate = roleCandidates.nth(index);
+    if (!(await candidate.isVisible().catch(() => false))) continue;
+    await candidate.click({ timeout: 3_000 });
+    await page.waitForTimeout(1_000);
+    return true;
+  }
+
+  const textMatches = surface.getByText(deliveryOrderingModeText, {
+    exact: true,
+  });
+  const textCount = Math.min(await textMatches.count().catch(() => 0), 12);
+  for (let index = 0; index < textCount; index += 1) {
+    const textMatch = textMatches.nth(index);
+    if (!(await textMatch.isVisible().catch(() => false))) continue;
+    const clickable = textMatch
+      .locator(
+        "xpath=ancestor-or-self::*[self::button or self::a or @role='button' or @role='tab' or @role='radio' or @jsaction or @tabindex][1]",
+      )
+      .first();
+    if (!(await clickable.isVisible().catch(() => false))) continue;
+    await clickable.click({ timeout: 3_000 });
+    await page.waitForTimeout(1_000);
+    return true;
+  }
+  return false;
+}
+
 async function collectOrderingModeLinks(
   page: Page,
   dialogVisible: boolean,
-): Promise<LinkCandidate[]> {
+): Promise<{
+  links: LinkCandidate[];
+  deliveryModeActivated: boolean;
+}> {
   const surface = dialogVisible
     ? page.locator('[role="dialog"]:visible, [aria-modal="true"]:visible').last()
     : page.locator("body");
   const collected = await (dialogVisible
     ? collectLinks(surface).catch(() => [] as LinkCandidate[])
     : collectPageLinks(page));
-  const modeLabels = await surface
-    .locator('button, [role="button"], [role="tab"], [tabindex="0"]')
-    .evaluateAll((controls) => [
-      ...new Set(
-        controls
-          .map((control) =>
-            `${control.getAttribute("aria-label") ?? ""} ${control.textContent ?? ""}`
-              .replace(/\s+/g, " ")
-              .trim(),
-          )
-          .filter((label) => /^(?:pickup|delivery|自取|外送|外卖)$/i.test(label)),
-      ),
-    ])
-    .catch(() => [] as string[]);
 
-  for (const modeLabel of modeLabels) {
-    const exactMode = new RegExp(`^${modeLabel.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`, "i");
-    const control = surface
-      .getByRole("button", { name: exactMode })
-      .or(surface.getByRole("tab", { name: exactMode }))
-      .first();
-    if (!(await control.isVisible().catch(() => false))) continue;
-    await control.click({ timeout: 3_000 }).catch(() => undefined);
-    await page.waitForTimeout(800);
-    const modeLinks = dialogVisible
+  const deliveryModeActivated = await activateDeliveryOrderingMode(
+    page,
+    surface,
+  ).catch(() => false);
+  if (deliveryModeActivated) {
+    const deliveryLinks = dialogVisible
       ? await collectLinks(surface).catch(() => [] as LinkCandidate[])
       : await collectPageLinks(page);
     collected.push(
-      ...modeLinks.map((link) => ({
+      ...deliveryLinks.map((link) => ({
         ...link,
-        text: `${link.text} ${modeLabel}`.trim(),
+        text: `${link.text} Delivery`.trim(),
       })),
     );
   }
-  return collected;
+  return { links: collected, deliveryModeActivated };
 }
 
 function normalizedHref(rawUrl: string): string | null {
@@ -947,10 +977,11 @@ export async function discoverGoogleOrderingLinks(
       .last();
     const dialogVisible = await visibleDialog.isVisible().catch(() => false);
     const separateOrderingSurface = orderingPage !== page;
-    const inspectedLinks = await collectOrderingModeLinks(
+    const orderingModeResult = await collectOrderingModeLinks(
       orderingPage,
       dialogVisible,
     );
+    const inspectedLinks = orderingModeResult.links;
     const selectedLinks = selectGoogleOrderingLinkCandidates(inspectedLinks, {
       baselineHrefs,
       withinDialog: dialogVisible || separateOrderingSurface,
@@ -1038,6 +1069,11 @@ export async function discoverGoogleOrderingLinks(
 
     const dedupedSources = dedupeSources(sources).slice(0, 6);
     if (dedupedSources.length === 0) {
+      if (!orderingModeResult.deliveryModeActivated) {
+        warnings.push(
+          "The Delivery/外送 ordering mode could not be activated.",
+        );
+      }
       if (
         skippedUnsupportedProviders.length > 0 ||
         skippedUnsupportedControls.length > 0
@@ -1071,6 +1107,7 @@ export async function discoverGoogleOrderingLinks(
         ...(orderControlLabel ? { orderControlLabel } : {}),
         orderControlLayout,
         orderingSurface: separateOrderingSurface ? "new_page" : "same_page",
+        deliveryModeActivated: orderingModeResult.deliveryModeActivated,
         finalGoogleMapsUrl,
         ...(pageTitle ? { pageTitle } : {}),
         consentHandled,
