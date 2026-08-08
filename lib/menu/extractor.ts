@@ -12,6 +12,7 @@ import {
 import {
   extractProviderMenuFromHtml,
   extractProviderMenuFromJson,
+  providerOrderingEntryUrl,
 } from "@/lib/menu/provider-parsers";
 import { fetchPublicHtml } from "@/lib/menu/security";
 import type {
@@ -71,6 +72,10 @@ export async function extractMenuFromSource(
   } catch (error) {
     directFetchWarnings.push(error instanceof Error ? error.message : "Direct page fetch failed.");
   }
+  const browserEntryUrl = providerOrderingEntryUrl(html, source, adapter.id);
+  if (browserEntryUrl !== source.url) {
+    warnings.push("Resolved the location page to its location-specific ordering application.");
+  }
 
   const directProviderExtraction = extractProviderMenuFromHtml(
     html,
@@ -86,7 +91,7 @@ export async function extractMenuFromSource(
     (extraction.items.length === 0 || adapter.captureNetworkJson)
   ) {
     try {
-      const rendered = await renderPublicPage(source.url, {
+      const rendered = await renderPublicPage(browserEntryUrl, {
         adapterId: adapter.id,
         restaurantAddress: context.restaurantAddress,
       });

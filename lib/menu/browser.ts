@@ -266,7 +266,8 @@ function isNonMenuProviderEndpoint(rawUrl: string): boolean {
     return (
       /cookielaw\.org|cookiebot\.com|onetrust\.com|contentful\.com/.test(target) ||
       /\/auth\/(?:refresh|session)|\/consent\/|\/locales?\/|\/translations?\//.test(target) ||
-      /\/(?:en|en-us)\.json$/.test(target)
+      /\/(?:en|en-us)\.json$/.test(target) ||
+      /\.(?:js|mjs|css|map|png|jpe?g|gif|svg|webp|ico|woff2?|ttf|eot)$/.test(url.pathname.toLowerCase())
     );
   } catch {
     return false;
