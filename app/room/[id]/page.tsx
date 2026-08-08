@@ -374,12 +374,160 @@ function PrimaryMenuPanel({ state }: { state?: CandidateMenuState }) {
         </ul>
       )}
       {menuWarnings.length > 0 && (
-        <ul className="mt-3 space-y-1 border-t border-white/10 pt-3 text-[10px] leading-4 text-amber-200/80">
-          {menuWarnings.map((warning, index) => (
-            <li key={`${index}-${warning}`}>• {warning}</li>
-          ))}
-        </ul>
+        <details className="mt-3 border-t border-white/10 pt-3 text-[10px] text-gray-500">
+          <summary className="cursor-pointer select-none font-medium text-gray-400 marker:text-gray-600">
+            Show scraper details · {menuWarnings.length} warning{menuWarnings.length === 1 ? "" : "s"}
+          </summary>
+          <ul className="mt-3 space-y-1 leading-4 text-amber-200/80">
+            {menuWarnings.map((warning, index) => (
+              <li key={`${index}-${warning}`}>• {warning}</li>
+            ))}
+          </ul>
+        </details>
       )}
+    </div>
+  );
+}
+
+function OrderingSourcesPanel({ state }: { state: CandidateOrderingState }) {
+  const primarySource = state.sources[0];
+  const technicalDetailCount =
+    state.sources.length + state.websiteFallbackSources.length + state.warnings.length;
+
+  return (
+    <div className="mt-4 rounded-xl border border-white/10 bg-black/20 p-3">
+      <div className="flex items-center justify-between gap-3 text-xs">
+        <span className="font-semibold text-emerald-200">Ordering providers</span>
+        <span className="text-gray-400">
+          {state.sources.length > 0
+            ? `${state.sources.length} provider link${state.sources.length === 1 ? "" : "s"}`
+            : "not found"}
+        </span>
+      </div>
+
+      {primarySource ? (
+        <div className="mt-3 flex items-start justify-between gap-3 rounded-lg border border-emerald-300/10 bg-emerald-500/5 p-3 text-xs">
+          <div className="min-w-0">
+            <p className="truncate font-semibold text-white">
+              {orderingSourceInventoryLabel(primarySource)}
+            </p>
+            <p className="mt-1 truncate text-[10px] text-gray-400">
+              {orderingSourceHostname(primarySource)} · {primarySource.fulfillment}
+            </p>
+          </div>
+          <span className="shrink-0 text-[10px] text-emerald-200/70">
+            {state.sources.length === 1
+              ? "top-listed"
+              : `+${state.sources.length - 1} alternative${state.sources.length === 2 ? "" : "s"}`}
+          </span>
+        </div>
+      ) : (
+        <p className="mt-2 text-xs leading-5 text-amber-200">
+          Google Maps exposed no resolvable provider URL for this listing.
+        </p>
+      )}
+
+      <details className="mt-3 border-t border-white/10 pt-3 text-[11px] text-gray-500">
+        <summary className="cursor-pointer select-none font-medium text-gray-400 marker:text-gray-600">
+          Show technical details{technicalDetailCount > 0 ? ` · ${technicalDetailCount}` : ""}
+        </summary>
+
+        <div className="mt-3">
+          {state.sources.length > 0 && (
+            <ul className="space-y-3 text-xs text-gray-300">
+              {state.sources.map((source) => (
+                <li key={source.id} className="rounded-lg border border-white/10 bg-white/5 p-3">
+                  <div className="flex items-start justify-between gap-2">
+                    <span className="font-semibold text-white">
+                      {orderingSourceInventoryLabel(source)}
+                    </span>
+                    <span className="shrink-0 text-[10px] uppercase tracking-wide text-gray-500">
+                      {source.fulfillment}
+                    </span>
+                  </div>
+                  <a
+                    href={source.url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="mt-2 block break-all text-purple-300 underline decoration-purple-300/30 underline-offset-2"
+                  >
+                    {orderingSourceHostname(source)} ↗
+                  </a>
+                  <p className="mt-1 break-all text-[10px] leading-4 text-gray-500">
+                    {source.url}
+                  </p>
+                  <p className="mt-2 text-[10px] text-gray-500">
+                    {source.discoveryMethod?.replaceAll("_", " ") ?? "google maps"}
+                    {source.evidenceText ? ` · ${source.evidenceText}` : ""}
+                  </p>
+                </li>
+              ))}
+            </ul>
+          )}
+
+          {state.websiteFallbackSources.length > 0 && (
+            <div className="mt-3 border-t border-white/10 pt-3 text-[11px] text-gray-500">
+              <p className="font-semibold text-gray-400">Website fallback — not counted</p>
+              {state.websiteFallbackSources.map((source) => (
+                <a
+                  key={source.id}
+                  href={source.url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="mt-1 block break-all text-gray-500 underline decoration-white/10 underline-offset-2"
+                >
+                  {orderingSourceHostname(source)} ↗
+                </a>
+              ))}
+            </div>
+          )}
+
+          {state.diagnostics && (
+            <div className="mt-3 border-t border-white/10 pt-3 text-[10px] leading-4 text-gray-500">
+              <p>
+                Online ordering control: {state.diagnostics.orderControlFound ? "found" : "not found"}
+                {state.diagnostics.orderControlLayout
+                  ? ` · ${state.diagnostics.orderControlLayout} layout`
+                  : ""}
+                {state.diagnostics.orderingSurface
+                  ? ` · ${state.diagnostics.orderingSurface.replaceAll("_", " ")}`
+                  : ""}
+              </p>
+              <p>
+                Result scope: {state.diagnostics.resultScope}
+                {` · ${state.diagnostics.inspectedLinkCount ?? 0} links inspected`}
+              </p>
+              {state.diagnostics.pageTitle && (
+                <p className="mt-1 break-words">Page: {state.diagnostics.pageTitle}</p>
+              )}
+              <p>Consent handled: {state.diagnostics.consentHandled ? "yes" : "no"}</p>
+              {state.diagnostics.visibleControlLabels.length > 0 && (
+                <p className="mt-1 break-words">
+                  Visible controls: {state.diagnostics.visibleControlLabels.slice(0, 12).join(" · ")}
+                </p>
+              )}
+              {state.diagnostics.unresolvedControlLabels.length > 0 && (
+                <p className="mt-1 break-words">
+                  Unresolved controls: {state.diagnostics.unresolvedControlLabels.join(", ")}
+                </p>
+              )}
+              {(state.diagnostics.skippedUnsupportedProviders?.length ?? 0) > 0 && (
+                <p className="mt-1 break-words">
+                  Skipped unsupported providers: {state.diagnostics.skippedUnsupportedProviders?.join(" · ")}
+                </p>
+              )}
+            </div>
+          )}
+
+          {state.warnings.length > 0 && (
+            <ul className="mt-3 space-y-1 border-t border-white/10 pt-3 text-[11px] leading-4 text-amber-200/80">
+              {state.warnings.map((warning, warningIndex) => (
+                <li key={`${warningIndex}-${warning}`}>• {warning}</li>
+              ))}
+            </ul>
+          )}
+        </div>
+      </details>
     </div>
   );
 }
@@ -2080,122 +2228,7 @@ export default function RoomPage() {
                                     )}
 
                                     {candidateOrdering[candidate.id]?.status === "success" && (
-                                      <div className="mt-4 rounded-xl border border-white/10 bg-black/20 p-3">
-                                        <div className="flex items-center justify-between gap-3 text-xs">
-                                          <span className="font-semibold text-emerald-200">
-                                            Google Maps primary ordering source
-                                          </span>
-                                          <span className="text-gray-400">
-                                            {candidateOrdering[candidate.id].sources.length > 0
-                                              ? `${candidateOrdering[candidate.id].sources.length} supported provider${candidateOrdering[candidate.id].sources.length === 1 ? "" : "s"}`
-                                              : "not found"}
-                                          </span>
-                                        </div>
-
-                                        {candidateOrdering[candidate.id].sources.length > 0 ? (
-                                          <ul className="mt-3 space-y-3 text-xs text-gray-300">
-                                            {candidateOrdering[candidate.id].sources.map((source) => (
-                                              <li key={source.id} className="rounded-lg border border-white/10 bg-white/5 p-3">
-                                                <div className="flex items-start justify-between gap-2">
-                                                  <span className="font-semibold text-white">
-                                                    {orderingSourceInventoryLabel(source)}
-                                                  </span>
-                                                  <span className="shrink-0 text-[10px] uppercase tracking-wide text-gray-500">
-                                                    {source.fulfillment}
-                                                  </span>
-                                                </div>
-                                                <a
-                                                  href={source.url}
-                                                  target="_blank"
-                                                  rel="noreferrer"
-                                                  className="mt-2 block break-all text-purple-300 underline decoration-purple-300/30 underline-offset-2"
-                                                >
-                                                  {orderingSourceHostname(source)} ↗
-                                                </a>
-                                                <p className="mt-1 break-all text-[10px] leading-4 text-gray-500">
-                                                  {source.url}
-                                                </p>
-                                                <p className="mt-2 text-[10px] text-gray-500">
-                                                  {source.discoveryMethod?.replaceAll("_", " ") ?? "google maps"}
-                                                  {source.evidenceText ? ` · ${source.evidenceText}` : ""}
-                                                </p>
-                                              </li>
-                                            ))}
-                                          </ul>
-                                        ) : (
-                                          <p className="mt-2 text-xs leading-5 text-amber-200">
-                                            Google Maps exposed no resolvable provider URL for this listing.
-                                          </p>
-                                        )}
-
-                                        {candidateOrdering[candidate.id].websiteFallbackSources.length > 0 && (
-                                          <div className="mt-3 border-t border-white/10 pt-3 text-[11px] text-gray-500">
-                                            <p className="font-semibold text-gray-400">
-                                              Website fallback — not counted
-                                            </p>
-                                            {candidateOrdering[candidate.id].websiteFallbackSources.map((source) => (
-                                              <a
-                                                key={source.id}
-                                                href={source.url}
-                                                target="_blank"
-                                                rel="noreferrer"
-                                                className="mt-1 block break-all text-gray-500 underline decoration-white/10 underline-offset-2"
-                                              >
-                                                {orderingSourceHostname(source)} ↗
-                                              </a>
-                                            ))}
-                                          </div>
-                                        )}
-
-                                        {candidateOrdering[candidate.id].diagnostics && (
-                                          <div className="mt-3 border-t border-white/10 pt-3 text-[10px] leading-4 text-gray-500">
-                                            <p>
-                                              Online ordering control: {candidateOrdering[candidate.id].diagnostics?.orderControlFound ? "found" : "not found"}
-                                              {candidateOrdering[candidate.id].diagnostics?.orderControlLayout
-                                                ? ` · ${candidateOrdering[candidate.id].diagnostics?.orderControlLayout} layout`
-                                                : ""}
-                                              {candidateOrdering[candidate.id].diagnostics?.orderingSurface
-                                                ? ` · ${candidateOrdering[candidate.id].diagnostics?.orderingSurface?.replaceAll("_", " ")}`
-                                                : ""}
-                                            </p>
-                                            <p>
-                                              Result scope: {candidateOrdering[candidate.id].diagnostics?.resultScope}
-                                              {` · ${candidateOrdering[candidate.id].diagnostics?.inspectedLinkCount ?? 0} links inspected`}
-                                            </p>
-                                            {candidateOrdering[candidate.id].diagnostics?.pageTitle && (
-                                              <p className="mt-1 break-words">
-                                                Page: {candidateOrdering[candidate.id].diagnostics?.pageTitle}
-                                              </p>
-                                            )}
-                                            <p>
-                                              Consent handled: {candidateOrdering[candidate.id].diagnostics?.consentHandled ? "yes" : "no"}
-                                            </p>
-                                            {(candidateOrdering[candidate.id].diagnostics?.visibleControlLabels.length ?? 0) > 0 && (
-                                              <p className="mt-1 break-words">
-                                                Visible controls: {candidateOrdering[candidate.id].diagnostics?.visibleControlLabels.slice(0, 12).join(" · ")}
-                                              </p>
-                                            )}
-                                            {(candidateOrdering[candidate.id].diagnostics?.unresolvedControlLabels.length ?? 0) > 0 && (
-                                              <p className="mt-1 break-words">
-                                                Unresolved controls: {candidateOrdering[candidate.id].diagnostics?.unresolvedControlLabels.join(", ")}
-                                              </p>
-                                            )}
-                                            {(candidateOrdering[candidate.id].diagnostics?.skippedUnsupportedProviders?.length ?? 0) > 0 && (
-                                              <p className="mt-1 break-words">
-                                                Skipped unsupported providers: {candidateOrdering[candidate.id].diagnostics?.skippedUnsupportedProviders?.join(" · ")}
-                                              </p>
-                                            )}
-                                          </div>
-                                        )}
-
-                                        {candidateOrdering[candidate.id].warnings.length > 0 && (
-                                          <ul className="mt-3 space-y-1 border-t border-white/10 pt-3 text-[11px] leading-4 text-amber-200/80">
-                                            {candidateOrdering[candidate.id].warnings.map((warning, warningIndex) => (
-                                              <li key={`${warningIndex}-${warning}`}>• {warning}</li>
-                                            ))}
-                                          </ul>
-                                        )}
-                                      </div>
+                                      <OrderingSourcesPanel state={candidateOrdering[candidate.id]} />
                                     )}
 
                                     <PrimaryMenuPanel state={candidateMenus[candidate.id]} />
