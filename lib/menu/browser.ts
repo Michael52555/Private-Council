@@ -879,8 +879,19 @@ export async function discoverGoogleOrderingLinks(
 
     context.on("page", recordNavigation);
     context.on("request", (request) => {
-      if (!request.isNavigationRequest() || request.resourceType() !== "document") return;
-      if (request.frame().parentFrame()) return;
+      if (
+        !request.isNavigationRequest() ||
+        request.resourceType() !== "document"
+      ) {
+        return;
+      }
+
+      try {
+        if (request.frame().parentFrame()) return;
+      } catch {
+        // The initial navigation of a newly created page may not have a frame yet.
+      }
+
       recordExternalNavigation(
         request.url(),
         "Document navigation from the Google Maps ordering control",
