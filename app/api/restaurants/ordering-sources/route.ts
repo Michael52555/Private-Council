@@ -15,17 +15,21 @@ export async function POST(request: Request) {
       placeId?: unknown;
       websiteUri?: unknown;
       googleMapsUri?: unknown;
+      forceRefresh?: unknown;
     };
     const placeId = typeof body.placeId === "string" ? body.placeId.trim() : "";
+    const forceRefresh = body.forceRefresh === true;
     if (!placeId || placeId.length > 300) {
       return NextResponse.json({ error: "A valid Google place ID is required." }, { status: 400 });
     }
 
     let cachedResult: ReturnType<typeof readOrderingDiscoveryCache> = null;
-    try {
-      cachedResult = readOrderingDiscoveryCache(placeId);
-    } catch (cacheError) {
-      console.warn("Ordering cache read failed; continuing without cache:", cacheError);
+    if (!forceRefresh) {
+      try {
+        cachedResult = readOrderingDiscoveryCache(placeId);
+      } catch (cacheError) {
+        console.warn("Ordering cache read failed; continuing without cache:", cacheError);
+      }
     }
     if (cachedResult) {
       return NextResponse.json(cachedResult, {
@@ -34,17 +38,27 @@ export async function POST(request: Request) {
     }
 
     const result = await runSingleFlight(`ordering:${placeId}`, async () => {
-      try {
-        const cacheRecheck = readOrderingDiscoveryCache(placeId);
-        if (cacheRecheck) return cacheRecheck;
-      } catch (cacheError) {
-        console.warn("Ordering cache recheck failed:", cacheError);
+      if (!forceRefresh) {
+        try {
+          const cacheRecheck = readOrderingDiscoveryCache(placeId);
+          if (cacheRecheck) return cacheRecheck;
+        } catch (cacheError) {
+          console.warn("Ordering cache recheck failed:", cacheError);
+        }
       }
 
       const freshResult = await discoverOrderingSources({
         placeId,
         websiteUri: typeof body.websiteUri === "string" ? body.websiteUri : undefined,
         googleMapsUri: typeof body.googleMapsUri === "string" ? body.googleMapsUri : undefined,
+      });
+      console.info("Ordering discovery completed", {
+        placeId,
+        sourceCount: freshResult.sources.length,
+        providers: freshResult.sources.map((source) => source.provider),
+        orderControlFound: freshResult.diagnostics.orderControlFound,
+        resultScope: freshResult.diagnostics.resultScope,
+        warnings: freshResult.warnings,
       });
       try {
         storeOrderingDiscoveryCache(placeId, freshResult);

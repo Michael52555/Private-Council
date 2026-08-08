@@ -11,11 +11,11 @@ import {
   summarizeTypicalMealPrices,
 } from "@/lib/menu/meal-estimate";
 
-const orderingSchemaVersion = 2;
+const orderingSchemaVersion = 3;
 export const menuSchemaVersion = 1;
 const menuAttemptVersion = 2;
 const orderingSuccessLifetimeMs = 14 * 24 * 60 * 60 * 1000;
-const orderingEmptyLifetimeMs = 30 * 60 * 1000;
+const orderingEmptyLifetimeMs = 5 * 60 * 1000;
 const failureRetryMs = 3 * 60 * 60 * 1000;
 
 export type OrderingDiscoveryCacheValue = {
@@ -161,6 +161,7 @@ export function storeOrderingDiscoveryCache(
 export function readMenuCache(
   placeId: string,
   sources?: OrderingSource[],
+  options: { ignoreRecentFailure?: boolean } = {},
 ): MenuCacheLookup {
   const row = database().prepare(`
     SELECT status, source_fingerprint, result_json, failure_reason, stored_at, retry_after
@@ -189,6 +190,7 @@ export function readMenuCache(
           return { status: "miss" };
         }
         if (
+          !options.ignoreRecentFailure &&
           typeof row.retry_after === "string" &&
           Date.parse(row.retry_after) > Date.now()
         ) {
@@ -213,6 +215,13 @@ export function readMenuCache(
         storedAt: row.stored_at,
       };
     }
+    return { status: "miss" };
+  }
+  if (row.status === "failure" && options.ignoreRecentFailure) {
+    database().prepare(`
+      DELETE FROM restaurant_menu_cache
+      WHERE place_id = ? AND schema_version = ? AND status = 'failure'
+    `).run(placeId, menuSchemaVersion);
     return { status: "miss" };
   }
   if (row.status === "failure" && !failureMatchesCurrentSources) {

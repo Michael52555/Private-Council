@@ -55,6 +55,22 @@ test("invalidates a negative menu cache when the provider inputs change", () => 
   );
 });
 
+test("allows an explicit retry to bypass an unchanged negative menu cache", () => {
+  const doorDash = source("https://doordash.com/store/manual-retry", "doordash");
+
+  storeMenuFailure("place-manual-retry", [doorDash], "DoorDash was blocked.");
+  assert.equal(
+    readMenuCache("place-manual-retry", [doorDash]).status,
+    "recent_failure",
+  );
+  assert.equal(
+    readMenuCache("place-manual-retry", [doorDash], {
+      ignoreRecentFailure: true,
+    }).status,
+    "miss",
+  );
+});
+
 test("the central database keeps the first reliable menu result", () => {
   const orderingSource = source("https://doordash.com/store/123", "doordash");
   const result = (median: number): RestaurantMenuResult => ({

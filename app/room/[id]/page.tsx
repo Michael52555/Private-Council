@@ -871,6 +871,7 @@ export default function RoomPage() {
   }
 
   async function handleGenerateCandidates() {
+    const forceRefreshFailedCaches = candidates.length > 0;
     const enrichmentRun =
       orderingDiscoveryRunRef.current + 1;
     orderingDiscoveryRunRef.current = enrichmentRun;
@@ -916,6 +917,7 @@ export default function RoomPage() {
         void enrichCandidateOrderingSources(
           data.candidates,
           enrichmentRun,
+          forceRefreshFailedCaches,
         );
     } catch (error) {
         const message =
@@ -932,6 +934,7 @@ export default function RoomPage() {
   async function handleDiscoverOrderingSources(
     candidate: RestaurantCandidate,
     enrichmentRun = orderingDiscoveryRunRef.current,
+    forceRefreshFailedCaches = false,
   ) {
     if (enrichmentRun !== orderingDiscoveryRunRef.current) {
       return;
@@ -964,6 +967,7 @@ export default function RoomPage() {
             placeId: candidate.id,
             websiteUri: candidate.websiteUri,
             googleMapsUri: candidate.googleMapsUri,
+            forceRefresh: forceRefreshFailedCaches,
           }),
         },
         ORDERING_DISCOVERY_TIMEOUT_MS,
@@ -1012,6 +1016,7 @@ export default function RoomPage() {
           { ...candidate, orderingSources: discovery.sources },
           discovery.sources,
           enrichmentRun,
+          forceRefreshFailedCaches,
         );
       }
     } catch (error) {
@@ -1045,6 +1050,7 @@ export default function RoomPage() {
   async function enrichCandidateOrderingSources(
     restaurantCandidates: RestaurantCandidate[],
     enrichmentRun: number,
+    forceRefreshFailedCaches: boolean,
   ) {
     let nextCandidateIndex = 0;
 
@@ -1069,6 +1075,7 @@ export default function RoomPage() {
         await handleDiscoverOrderingSources(
           candidate,
           enrichmentRun,
+          forceRefreshFailedCaches,
         );
       }
     }
@@ -1080,6 +1087,7 @@ export default function RoomPage() {
     candidate: RestaurantCandidate,
     sources = candidate.orderingSources,
     enrichmentRun?: number,
+    retryFailed = false,
   ) {
     if (
       typeof enrichmentRun === "number" &&
@@ -1114,6 +1122,7 @@ export default function RoomPage() {
             restaurantName: candidate.name,
             restaurantAddress: candidate.address,
             sources: sources.slice(0, 3),
+            retryFailed,
           }),
         },
         MENU_EXTRACTION_TIMEOUT_MS,

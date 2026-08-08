@@ -70,7 +70,7 @@ each participant's browser. The API routes use a shared SQLite database at
 `.data/restaurant-cache.sqlite` by default:
 
 - Successful Google ordering-source discovery is cached for 14 days. Empty
-  discovery results are cached for only 30 minutes because Google Maps controls
+  discovery results are cached for only five minutes because Google Maps controls
   and browser rendering can be transient.
 - Extracted raw menu items and their derived meal estimate have separate cache
   semantics. Raw items are retained, but a result that no longer produces a
@@ -81,6 +81,8 @@ each participant's browser. The API routes use a shared SQLite database at
   versioned and fingerprinted by their provider inputs, so a changed adapter or
   provider list invalidates only the affected failures without deleting useful
   menu data.
+- Clicking **Regenerate options** bypasses negative ordering and menu caches for
+  unresolved restaurants while continuing to reuse successful menu results.
 - Incrementing `menuSchemaVersion` starts a clean generation when the extraction
   or meal-estimation algorithm changes.
 

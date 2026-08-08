@@ -33,6 +33,7 @@ export async function POST(request: Request) {
       restaurantName?: unknown;
       restaurantAddress?: unknown;
       sources?: unknown;
+      retryFailed?: unknown;
     };
     const placeId = typeof body.placeId === "string" ? body.placeId.trim() : "";
     if (!placeId || placeId.length > 300) {
@@ -43,13 +44,16 @@ export async function POST(request: Request) {
     }
 
     const sources = body.sources.filter(isOrderingSource).slice(0, 3);
+    const retryFailed = body.retryFailed === true;
     if (sources.length === 0) {
       return NextResponse.json({ error: "No valid HTTPS ordering sources were supplied." }, { status: 400 });
     }
 
     let cachedMenu: ReturnType<typeof readMenuCache> = { status: "miss" };
     try {
-      cachedMenu = readMenuCache(placeId, sources);
+      cachedMenu = readMenuCache(placeId, sources, {
+        ignoreRecentFailure: retryFailed,
+      });
     } catch (cacheError) {
       console.warn("Menu cache read failed; continuing without cache:", cacheError);
     }
@@ -79,7 +83,9 @@ export async function POST(request: Request) {
 
     const result = await runSingleFlight(`menu:${placeId}`, async () => {
       try {
-        const cacheRecheck = readMenuCache(placeId, sources);
+        const cacheRecheck = readMenuCache(placeId, sources, {
+          ignoreRecentFailure: retryFailed,
+        });
         if (cacheRecheck.status === "success") return cacheRecheck.result;
       } catch (cacheError) {
         console.warn("Menu cache recheck failed:", cacheError);
@@ -120,6 +126,16 @@ export async function POST(request: Request) {
           console.warn("Menu failure cache write failed:", cacheError);
         }
       }
+      console.info("Menu extraction completed", {
+        placeId,
+        restaurantName: freshResult.restaurantName,
+        sourceProviders: sources.map((source) => source.provider),
+        menuItemCount: freshResult.items.length,
+        pricedSampleCount: freshResult.priceSummary.sampleItemCount,
+        estimateConfidence: freshResult.priceSummary.confidence,
+        estimatePattern: freshResult.priceSummary.mealPattern,
+        warnings: freshResult.menus.flatMap((menu) => menu.warnings).slice(0, 12),
+      });
       return freshResult;
     });
     return NextResponse.json(result, {
