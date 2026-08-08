@@ -71,6 +71,18 @@ test("allows an explicit retry to bypass an unchanged negative menu cache", () =
   );
 });
 
+test("bypasses restaurant cache reads and writes when debugging is enabled", () => {
+  const doorDash = source("https://doordash.com/store/no-cache", "doordash");
+  process.env.RESTAURANT_CACHE_DISABLED = "1";
+  try {
+    storeMenuFailure("place-no-cache", [doorDash], "Should not be stored.");
+    assert.equal(readMenuCache("place-no-cache", [doorDash]).status, "miss");
+    assert.equal(readSuccessfulMenuCacheBatch(["place-no-cache"]).size, 0);
+  } finally {
+    delete process.env.RESTAURANT_CACHE_DISABLED;
+  }
+});
+
 test("the central database keeps the first reliable menu result", () => {
   const orderingSource = source("https://doordash.com/store/123", "doordash");
   const result = (median: number): RestaurantMenuResult => ({

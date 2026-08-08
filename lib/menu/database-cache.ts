@@ -18,6 +18,12 @@ const orderingSuccessLifetimeMs = 14 * 24 * 60 * 60 * 1000;
 const orderingEmptyLifetimeMs = 5 * 60 * 1000;
 const failureRetryMs = 3 * 60 * 60 * 1000;
 
+export function isRestaurantCacheDisabled(): boolean {
+  return /^(?:1|true|yes|on)$/i.test(
+    process.env.RESTAURANT_CACHE_DISABLED?.trim() ?? "",
+  );
+}
+
 export type OrderingDiscoveryCacheValue = {
   sources: OrderingSource[];
   websiteFallbackSources: OrderingSource[];
@@ -118,6 +124,7 @@ export function menuSourceFingerprint(sources: OrderingSource[]): string {
 export function readOrderingDiscoveryCache(
   placeId: string,
 ): OrderingDiscoveryCacheValue | null {
+  if (isRestaurantCacheDisabled()) return null;
   const row = database().prepare(`
     SELECT schema_version, payload_json, expires_at
     FROM restaurant_ordering_cache
@@ -136,6 +143,7 @@ export function storeOrderingDiscoveryCache(
   placeId: string,
   value: OrderingDiscoveryCacheValue,
 ): void {
+  if (isRestaurantCacheDisabled()) return;
   const now = Date.now();
   const lifetimeMs = value.sources.length > 0
     ? orderingSuccessLifetimeMs
@@ -163,6 +171,7 @@ export function readMenuCache(
   sources?: OrderingSource[],
   options: { ignoreRecentFailure?: boolean } = {},
 ): MenuCacheLookup {
+  if (isRestaurantCacheDisabled()) return { status: "miss" };
   const row = database().prepare(`
     SELECT status, source_fingerprint, result_json, failure_reason, stored_at, retry_after
     FROM restaurant_menu_cache
@@ -255,6 +264,7 @@ export function readMenuCache(
 export function readSuccessfulMenuCacheBatch(
   placeIds: string[],
 ): Map<string, SuccessfulMenuCacheValue> {
+  if (isRestaurantCacheDisabled()) return new Map();
   const uniquePlaceIds = [...new Set(placeIds.filter(Boolean))].slice(0, 100);
   if (uniquePlaceIds.length === 0) return new Map();
 
@@ -287,6 +297,7 @@ export function storeMenuSuccessOnce(
   sources: OrderingSource[],
   result: RestaurantMenuResult,
 ): void {
+  if (isRestaurantCacheDisabled()) return;
   const existingRow = database().prepare(`
     SELECT result_json
     FROM restaurant_menu_cache
@@ -326,6 +337,7 @@ export function storeMenuFailure(
   sources: OrderingSource[],
   reason: string,
 ): void {
+  if (isRestaurantCacheDisabled()) return;
   const now = Date.now();
   database().prepare(`
     INSERT INTO restaurant_menu_cache (

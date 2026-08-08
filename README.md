@@ -114,6 +114,15 @@ Optional central cache configuration:
 
 - `RESTAURANT_CACHE_DB_PATH`: persistent SQLite path. Defaults to
   `.data/restaurant-cache.sqlite` for local development.
+- `RESTAURANT_CACHE_DISABLED`: set to `1` during scraper debugging to bypass
+  every restaurant ordering/menu cache read and write. Leave unset in normal
+  central-model operation.
+
+To remove all locally stored restaurant ordering and menu results, stop the dev
+server first and run `npm run cache:clear`. This deletes the configured SQLite
+database together with its `-wal` and `-shm` sidecar files. To run every request
+live without recreating cache entries, start development with
+`RESTAURANT_CACHE_DISABLED=1 npm run dev`.
 
 During local development, an installed macOS/Windows/Linux Chrome or Chromium is
 detected automatically. In a hosted environment, set `PLAYWRIGHT_WS_ENDPOINT`.
