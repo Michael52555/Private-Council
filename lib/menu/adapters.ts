@@ -11,7 +11,8 @@ export type MenuAdapterId =
   | "clover"
   | "panda_express"
   | "habit_burger"
-  | "taco_bell";
+  | "taco_bell"
+  | "chick_fil_a";
 
 export type MenuProviderAdapter = {
   id: MenuAdapterId;
@@ -112,6 +113,14 @@ export const MENU_PROVIDER_ADAPTERS: readonly MenuProviderAdapter[] = [
     provider: "restaurant_website",
     hostnames: ["tacobell.com"],
     controlAliases: [/taco\s*bell/i],
+    captureNetworkJson: true,
+  },
+  {
+    id: "chick_fil_a",
+    label: "Chick-fil-A",
+    provider: "restaurant_website",
+    hostnames: ["chick-fil-a.com"],
+    controlAliases: [/chick[ -]?fil[ -]?a/i],
     captureNetworkJson: true,
   },
 ] as const;

@@ -8,6 +8,7 @@ import {
   menuSourceFingerprint,
   readMenuCache,
   readSuccessfulMenuCacheBatch,
+  storeMenuFailure,
   storeMenuSuccessOnce,
 } from "@/lib/menu/database-cache";
 
@@ -81,7 +82,7 @@ test("the central database keeps the first reliable menu result", () => {
   assert.equal(batch.get("place-first-result")?.result.priceSummary.median, 12);
 });
 
-test("recomputes a stale sushi estimate from cached raw items", () => {
+test("keeps stale raw items but retries when they no longer yield a meal estimate", () => {
   const orderingSource = source("https://doordash.com/store/kiyo", "doordash");
   const staleResult: RestaurantMenuResult = {
     placeId: "place-kiyo",
@@ -109,11 +110,31 @@ test("recomputes a stale sushi estimate from cached raw items", () => {
 
   storeMenuSuccessOnce("place-kiyo", [orderingSource], staleResult);
 
-  const cached = readMenuCache("place-kiyo");
-  assert.equal(cached.status, "success");
-  if (cached.status === "success") {
-    assert.equal(cached.result.items.length, 4);
-    assert.equal(cached.result.priceSummary.sampleItemCount, 0);
-    assert.equal(cached.result.priceSummary.median, null);
+  assert.equal(readMenuCache("place-kiyo").status, "miss");
+  assert.equal(readSuccessfulMenuCacheBatch(["place-kiyo"]).size, 0);
+
+  storeMenuFailure(
+    "place-kiyo",
+    [orderingSource],
+    "No alternative provider produced a reliable meal estimate.",
+  );
+  assert.equal(readMenuCache("place-kiyo").status, "recent_failure");
+
+  const recoveredResult: RestaurantMenuResult = {
+    ...staleResult,
+    items: [18, 24, 30].map((price, index) => ({
+      id: `complete-meal-${index}`,
+      name: `Sushi Combination Meal ${index + 1}`,
+      section: "Complete Meals",
+      price,
+      currency: "USD",
+      sourceId: "alternative-source",
+    })),
+  };
+  storeMenuSuccessOnce("place-kiyo", [orderingSource], recoveredResult);
+  const recovered = readMenuCache("place-kiyo");
+  assert.equal(recovered.status, "success");
+  if (recovered.status === "success") {
+    assert.equal(recovered.result.priceSummary.median, 24);
   }
 });

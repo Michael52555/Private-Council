@@ -70,6 +70,11 @@ const PROVIDER_SCHEMAS: Record<MenuAdapterId, ProviderSchema> = {
     sectionCollections: /^(?:menus|categories|sections|menuProductCategories)$/i,
     ignoredCollections: COMMON_IGNORED_COLLECTIONS,
   },
+  chick_fil_a: {
+    itemCollections: /^(?:items|menuItems|products|menuProducts|entries)$/i,
+    sectionCollections: /^(?:menus|categories|sections|menuProductCategories|groups)$/i,
+    ignoredCollections: COMMON_IGNORED_COLLECTIONS,
+  },
 };
 
 function isObject(value: unknown): value is JsonObject {

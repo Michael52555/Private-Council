@@ -36,7 +36,8 @@ extraction:
 Candidate generation can return up to twenty restaurants. Cached menu results
 are joined into that initial response in one database query, so known places are
 scored immediately and never enter the scraper queue. Three bounded workers
-inspect only cache misses. The registered provider adapters try up to three
+inspect only cache misses. The registered provider adapters, including major
+platforms and supported first-party chains such as Chick-fil-A, try up to three
 Google-listed sources in order and stop at the first reliable priced menu.
 A successful menu can replace the Google fallback with a typical per-person
 meal estimate. The estimator classifies raw menu items into complete meals,
@@ -68,9 +69,13 @@ Ordering discovery and menu extraction are cached on the server rather than in
 each participant's browser. The API routes use a shared SQLite database at
 `.data/restaurant-cache.sqlite` by default:
 
-- Google ordering-source discovery is cached for 14 days.
-- The first reliable menu result for a Google place ID is stored permanently
-  for the current menu schema version.
+- Successful Google ordering-source discovery is cached for 14 days. Empty
+  discovery results are cached for only 30 minutes because Google Maps controls
+  and browser rendering can be transient.
+- Extracted raw menu items and their derived meal estimate have separate cache
+  semantics. Raw items are retained, but a result that no longer produces a
+  reliable estimate remains eligible for another provider attempt. The first
+  reliable result for the current menu schema is then reused permanently.
 - Failed or price-less menu attempts are cached for three hours so many local
   agents do not repeatedly hit the same blocked provider.
 - Incrementing `menuSchemaVersion` starts a clean generation when the extraction

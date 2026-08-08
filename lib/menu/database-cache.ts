@@ -6,11 +6,15 @@ import type {
   OrderingSource,
   RestaurantMenuResult,
 } from "@/lib/menu/types";
-import { summarizeTypicalMealPrices } from "@/lib/menu/meal-estimate";
+import {
+  hasReliableMealEstimate,
+  summarizeTypicalMealPrices,
+} from "@/lib/menu/meal-estimate";
 
-const orderingSchemaVersion = 1;
+const orderingSchemaVersion = 2;
 export const menuSchemaVersion = 1;
-const orderingLifetimeMs = 14 * 24 * 60 * 60 * 1000;
+const orderingSuccessLifetimeMs = 14 * 24 * 60 * 60 * 1000;
+const orderingEmptyLifetimeMs = 30 * 60 * 1000;
 const failureRetryMs = 3 * 60 * 60 * 1000;
 
 export type OrderingDiscoveryCacheValue = {
@@ -131,6 +135,9 @@ export function storeOrderingDiscoveryCache(
   value: OrderingDiscoveryCacheValue,
 ): void {
   const now = Date.now();
+  const lifetimeMs = value.sources.length > 0
+    ? orderingSuccessLifetimeMs
+    : orderingEmptyLifetimeMs;
   database().prepare(`
     INSERT INTO restaurant_ordering_cache (
       place_id, schema_version, payload_json, stored_at, expires_at
@@ -145,7 +152,7 @@ export function storeOrderingDiscoveryCache(
     orderingSchemaVersion,
     JSON.stringify(value),
     new Date(now).toISOString(),
-    new Date(now + orderingLifetimeMs).toISOString(),
+    new Date(now + lifetimeMs).toISOString(),
   );
 }
 
@@ -160,9 +167,30 @@ export function readMenuCache(placeId: string): MenuCacheLookup {
   if (row.status === "success") {
     const result = parseJson<RestaurantMenuResult>(row.result_json);
     if (result && typeof row.stored_at === "string") {
+      const currentResult = withCurrentPriceEstimate(result);
+      if (!hasReliableMealEstimate(currentResult.priceSummary)) {
+        if (
+          typeof row.retry_after === "string" &&
+          Date.parse(row.retry_after) > Date.now()
+        ) {
+          return {
+            status: "recent_failure",
+            reason: typeof row.failure_reason === "string"
+              ? row.failure_reason
+              : "The cached raw menu does not currently produce a reliable meal estimate.",
+            retryAfter: row.retry_after,
+          };
+        }
+        database().prepare(`
+          UPDATE restaurant_menu_cache
+          SET failure_reason = NULL, retry_after = NULL
+          WHERE place_id = ? AND schema_version = ? AND status = 'success'
+        `).run(placeId, menuSchemaVersion);
+        return { status: "miss" };
+      }
       return {
         status: "success",
-        result: withCurrentPriceEstimate(result),
+        result: currentResult,
         storedAt: row.stored_at,
       };
     }
@@ -209,8 +237,10 @@ export function readSuccessfulMenuCacheBatch(
     if (typeof row.place_id !== "string" || typeof row.stored_at !== "string") continue;
     const result = parseJson<RestaurantMenuResult>(row.result_json);
     if (!result) continue;
+    const currentResult = withCurrentPriceEstimate(result);
+    if (!hasReliableMealEstimate(currentResult.priceSummary)) continue;
     results.set(row.place_id, {
-      result: withCurrentPriceEstimate(result),
+      result: currentResult,
       storedAt: row.stored_at,
     });
   }
@@ -222,6 +252,19 @@ export function storeMenuSuccessOnce(
   sources: OrderingSource[],
   result: RestaurantMenuResult,
 ): void {
+  const existingRow = database().prepare(`
+    SELECT result_json
+    FROM restaurant_menu_cache
+    WHERE place_id = ? AND schema_version = ? AND status = 'success'
+  `).get(placeId, menuSchemaVersion) as Record<string, unknown> | undefined;
+  const existingResult = parseJson<RestaurantMenuResult>(existingRow?.result_json);
+  if (
+    existingResult &&
+    hasReliableMealEstimate(withCurrentPriceEstimate(existingResult).priceSummary)
+  ) {
+    return;
+  }
+
   database().prepare(`
     INSERT INTO restaurant_menu_cache (
       place_id, schema_version, status, source_fingerprint,
@@ -234,7 +277,6 @@ export function storeMenuSuccessOnce(
       failure_reason = NULL,
       stored_at = excluded.stored_at,
       retry_after = NULL
-    WHERE restaurant_menu_cache.status = 'failure'
   `).run(
     placeId,
     menuSchemaVersion,
@@ -256,13 +298,13 @@ export function storeMenuFailure(
       result_json, failure_reason, stored_at, retry_after
     ) VALUES (?, ?, 'failure', ?, NULL, ?, ?, ?)
     ON CONFLICT(place_id, schema_version) DO UPDATE SET
-      status = 'failure',
       source_fingerprint = excluded.source_fingerprint,
-      result_json = NULL,
       failure_reason = excluded.failure_reason,
-      stored_at = excluded.stored_at,
+      stored_at = CASE
+        WHEN restaurant_menu_cache.status = 'failure' THEN excluded.stored_at
+        ELSE restaurant_menu_cache.stored_at
+      END,
       retry_after = excluded.retry_after
-    WHERE restaurant_menu_cache.status = 'failure'
   `).run(
     placeId,
     menuSchemaVersion,

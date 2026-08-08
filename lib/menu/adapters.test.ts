@@ -18,6 +18,14 @@ test("matches major platform and chain ordering adapters", () => {
     menuAdapterForControlLabel("Order with Toast")?.id,
     "toast",
   );
+  assert.equal(
+    menuAdapterForUrl("https://order.chick-fil-a.com/location/example")?.id,
+    "chick_fil_a",
+  );
+  assert.equal(
+    menuAdapterForControlLabel("chick-fil-a.com Merchant website")?.id,
+    "chick_fil_a",
+  );
 });
 
 test("leaves unsupported first-party providers out of the adapter registry", () => {
