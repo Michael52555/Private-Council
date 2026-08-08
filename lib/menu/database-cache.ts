@@ -6,6 +6,7 @@ import type {
   OrderingSource,
   RestaurantMenuResult,
 } from "@/lib/menu/types";
+import { summarizeTypicalMealPrices } from "@/lib/menu/meal-estimate";
 
 const orderingSchemaVersion = 1;
 export const menuSchemaVersion = 1;
@@ -82,6 +83,17 @@ function parseJson<T>(value: unknown): T | null {
   }
 }
 
+function withCurrentPriceEstimate(
+  result: RestaurantMenuResult,
+): RestaurantMenuResult {
+  return {
+    ...result,
+    priceSummary: summarizeTypicalMealPrices(result.items, {
+      restaurantName: result.restaurantName,
+    }),
+  };
+}
+
 function normalizeHostname(source: OrderingSource): string {
   try {
     return new URL(source.url).hostname.toLowerCase().replace(/^www\./, "");
@@ -148,7 +160,11 @@ export function readMenuCache(placeId: string): MenuCacheLookup {
   if (row.status === "success") {
     const result = parseJson<RestaurantMenuResult>(row.result_json);
     if (result && typeof row.stored_at === "string") {
-      return { status: "success", result, storedAt: row.stored_at };
+      return {
+        status: "success",
+        result: withCurrentPriceEstimate(result),
+        storedAt: row.stored_at,
+      };
     }
     return { status: "miss" };
   }
@@ -193,7 +209,10 @@ export function readSuccessfulMenuCacheBatch(
     if (typeof row.place_id !== "string" || typeof row.stored_at !== "string") continue;
     const result = parseJson<RestaurantMenuResult>(row.result_json);
     if (!result) continue;
-    results.set(row.place_id, { result, storedAt: row.stored_at });
+    results.set(row.place_id, {
+      result: withCurrentPriceEstimate(result),
+      storedAt: row.stored_at,
+    });
   }
   return results;
 }
@@ -220,7 +239,7 @@ export function storeMenuSuccessOnce(
     placeId,
     menuSchemaVersion,
     menuSourceFingerprint(sources),
-    JSON.stringify(result),
+    JSON.stringify(withCurrentPriceEstimate(result)),
     new Date().toISOString(),
   );
 }

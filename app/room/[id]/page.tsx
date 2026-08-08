@@ -21,6 +21,10 @@ import {
   orderingSourceHostname,
   orderingSourceInventoryLabel,
 } from "@/lib/menu/survey";
+import {
+  hasReliableMealEstimate,
+  mealEstimateConfidence,
+} from "@/lib/menu/meal-estimate";
 
 import {
   evaluateRestaurantScore,
@@ -365,7 +369,7 @@ function PrimaryMenuPanel({ state }: { state?: CandidateMenuState }) {
             ? ` · ${state.result.priceSummary.excludedItemCount} non-meal items excluded`
             : ""}
         </p>
-        {state.result.priceSummary.sampleItemCount >= 3 && (
+        {hasReliableMealEstimate(state.result.priceSummary) && (
           <p className="mt-2 text-emerald-100">
             Typical meal estimate: ${state.result.priceSummary.lowerQuartile?.toFixed(2)}–$
             {state.result.priceSummary.upperQuartile?.toFixed(2)} · median $
@@ -1056,8 +1060,7 @@ export default function RoomPage() {
         }
 
         if (
-          candidate.menuStatus === "loaded" &&
-          candidate.budgetEstimateSource === "menu"
+          candidate.menuStatus === "loaded"
         ) {
           continue;
         }
@@ -1132,7 +1135,7 @@ export default function RoomPage() {
         [candidate.id]: { status: "success", result: data },
       }));
 
-      const hasReliablePriceSample = data.priceSummary.sampleItemCount >= 3;
+      const hasReliablePriceSample = hasReliableMealEstimate(data.priceSummary);
       setCandidates((current) =>
         current.map((entry) =>
           entry.id === candidate.id
@@ -1151,7 +1154,7 @@ export default function RoomPage() {
                   ? "menu"
                   : entry.googleBudgetEstimateSource,
                 budgetEstimateConfidence: hasReliablePriceSample
-                  ? "high"
+                  ? mealEstimateConfidence(data.priceSummary)
                   : entry.googleBudgetEstimateConfidence,
                 budgetEstimateCurrency: hasReliablePriceSample
                   ? data.priceSummary.currency ?? "USD"

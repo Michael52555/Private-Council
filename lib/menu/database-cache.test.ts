@@ -45,7 +45,14 @@ test("the central database keeps the first reliable menu result", () => {
     placeId: "place-first-result",
     restaurantName: "Cache Test",
     menus: [],
-    items: [],
+    items: [median - 1, median, median + 1].map((price, index) => ({
+      id: `meal-${median}-${index}`,
+      name: `Chicken Bowl ${index + 1}`,
+      section: "Meals",
+      price,
+      currency: "USD",
+      sourceId: "source",
+    })),
     priceSummary: {
       minimum: median,
       maximum: median,
@@ -72,4 +79,41 @@ test("the central database keeps the first reliable menu result", () => {
   const batch = readSuccessfulMenuCacheBatch(["place-first-result", "missing-place"]);
   assert.equal(batch.size, 1);
   assert.equal(batch.get("place-first-result")?.result.priceSummary.median, 12);
+});
+
+test("recomputes a stale sushi estimate from cached raw items", () => {
+  const orderingSource = source("https://doordash.com/store/kiyo", "doordash");
+  const staleResult: RestaurantMenuResult = {
+    placeId: "place-kiyo",
+    restaurantName: "Kiyo Sushi & Sake",
+    menus: [],
+    items: [
+      { id: "salmon", name: "Salmon Nigiri", section: "Nigiri", price: 3, currency: "USD", sourceId: "source" },
+      { id: "tuna", name: "Tuna Nigiri", section: "Nigiri", price: 3.5, currency: "USD", sourceId: "source" },
+      { id: "yellowtail", name: "Yellowtail Nigiri", section: "Nigiri", price: 4, currency: "USD", sourceId: "source" },
+      { id: "hand-roll", name: "Spicy Tuna Hand Roll", section: "Hand Rolls", price: 7.7, currency: "USD", sourceId: "source" },
+    ],
+    priceSummary: {
+      minimum: 3,
+      maximum: 7.7,
+      lowerQuartile: 3,
+      upperQuartile: 7.7,
+      median: 3.75,
+      currency: "USD",
+      basis: "filtered_menu_items",
+      sampleItemCount: 4,
+      excludedItemCount: 0,
+      sampleItemIds: ["salmon", "tuna", "yellowtail", "hand-roll"],
+    },
+  };
+
+  storeMenuSuccessOnce("place-kiyo", [orderingSource], staleResult);
+
+  const cached = readMenuCache("place-kiyo");
+  assert.equal(cached.status, "success");
+  if (cached.status === "success") {
+    assert.equal(cached.result.items.length, 4);
+    assert.equal(cached.result.priceSummary.sampleItemCount, 0);
+    assert.equal(cached.result.priceSummary.median, null);
+  }
 });

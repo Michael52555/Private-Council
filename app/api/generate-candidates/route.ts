@@ -4,6 +4,10 @@ import {
   type GooglePriceRange,
 } from "@/lib/budget-estimate";
 import { readSuccessfulMenuCacheBatch } from "@/lib/menu/database-cache";
+import {
+  hasReliableMealEstimate,
+  mealEstimateConfidence,
+} from "@/lib/menu/meal-estimate";
 import type { RestaurantCandidate } from "@/lib/planning-types";
 
 type GeocodedOrigin = {
@@ -237,7 +241,14 @@ export async function POST(request: Request) {
 
     const hydratedCandidates = candidates.map((candidate) => {
       const cachedMenu = cachedMenus.get(candidate.id)?.result;
-      if (!cachedMenu || cachedMenu.priceSummary.sampleItemCount < 3) return candidate;
+      if (!cachedMenu) return candidate;
+      if (!hasReliableMealEstimate(cachedMenu.priceSummary)) {
+        return {
+          ...candidate,
+          menuStatus: "loaded" as const,
+          menuItemCount: cachedMenu.items.length,
+        };
+      }
       return {
         ...candidate,
         estimatedPriceMin:
@@ -246,7 +257,7 @@ export async function POST(request: Request) {
           cachedMenu.priceSummary.upperQuartile ?? cachedMenu.priceSummary.maximum,
         pricePerPerson: cachedMenu.priceSummary.median,
         budgetEstimateSource: "menu" as const,
-        budgetEstimateConfidence: "high" as const,
+        budgetEstimateConfidence: mealEstimateConfidence(cachedMenu.priceSummary),
         budgetEstimateCurrency: cachedMenu.priceSummary.currency ?? "USD",
         menuStatus: "loaded" as const,
         menuItemCount: cachedMenu.items.length,

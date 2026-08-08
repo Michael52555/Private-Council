@@ -5,7 +5,10 @@ import {
   type HtmlMenuExtraction,
 } from "@/lib/menu/html";
 import { menuAdapterForUrl } from "@/lib/menu/adapters";
-import { summarizeTypicalMealPrices } from "@/lib/menu/meal-estimate";
+import {
+  hasReliableMealEstimate,
+  summarizeTypicalMealPrices,
+} from "@/lib/menu/meal-estimate";
 import {
   extractProviderMenuFromHtml,
   extractProviderMenuFromJson,
@@ -157,17 +160,19 @@ export async function extractMenuFromSource(
 
 export async function extractMenusWithFallback(
   sources: OrderingSource[],
-  context: { restaurantAddress?: string } = {},
+  context: { restaurantAddress?: string; restaurantName?: string } = {},
   extractSource: (
     source: OrderingSource,
-    context: { restaurantAddress?: string },
+    context: { restaurantAddress?: string; restaurantName?: string },
   ) => Promise<ExtractedMenu> = extractMenuFromSource,
 ): Promise<ExtractedMenu[]> {
   const menus: ExtractedMenu[] = [];
   for (const [sourceIndex, source] of sources.slice(0, 3).entries()) {
     const menu = await extractSource(source, context);
-    const mealSummary = summarizeTypicalMealPrices(menu.items);
-    const hasReliablePriceSample = mealSummary.sampleItemCount >= 3;
+    const mealSummary = summarizeTypicalMealPrices(menu.items, {
+      restaurantName: context.restaurantName,
+    });
+    const hasReliablePriceSample = hasReliableMealEstimate(mealSummary);
     if (sourceIndex > 0 && hasReliablePriceSample) {
       menu.warnings.unshift(
         `Fallback provider used after ${sourceIndex} higher-listed source${sourceIndex === 1 ? "" : "s"} returned no reliable menu prices.`,
@@ -187,6 +192,7 @@ export async function extractRestaurantMenus(input: {
 }): Promise<RestaurantMenuResult> {
   const menus = await extractMenusWithFallback(input.sources, {
     restaurantAddress: input.restaurantAddress,
+    restaurantName: input.restaurantName,
   });
 
   const items = menus.flatMap((menu) => menu.items);
@@ -195,6 +201,8 @@ export async function extractRestaurantMenus(input: {
     restaurantName: input.restaurantName,
     menus,
     items,
-    priceSummary: summarizeTypicalMealPrices(items),
+    priceSummary: summarizeTypicalMealPrices(items, {
+      restaurantName: input.restaurantName,
+    }),
   };
 }

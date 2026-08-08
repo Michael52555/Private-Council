@@ -6,6 +6,7 @@ import {
   storeMenuSuccessOnce,
 } from "@/lib/menu/database-cache";
 import { runSingleFlight } from "@/lib/menu/singleflight";
+import { hasReliableMealEstimate } from "@/lib/menu/meal-estimate";
 import type { OrderingSource } from "@/lib/menu/types";
 
 export const runtime = "nodejs";
@@ -106,7 +107,7 @@ export async function POST(request: Request) {
         }
         throw error;
       }
-      if (freshResult.priceSummary.sampleItemCount >= 3) {
+      if (hasReliableMealEstimate(freshResult.priceSummary)) {
         try {
           storeMenuSuccessOnce(placeId, sources, freshResult);
         } catch (cacheError) {

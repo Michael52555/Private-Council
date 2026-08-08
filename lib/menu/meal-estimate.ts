@@ -1,8 +1,16 @@
 import type { MenuItem, RestaurantMenuResult } from "@/lib/menu/types";
+import type { BudgetEstimateConfidence } from "@/lib/planning-types";
 
 const ACCESSORY_PATTERN = /\b(?:add[ -]?ons?|extras?|modifier|choice|option|sauces?|dips?|dressings?|condiments?|toppings?|sides?|beverages?|drinks?|sodas?|coffee|tea|desserts?|sweets?|cookies?|utensils?|napkins?|cutlery)\b/i;
 const NON_INDIVIDUAL_PATTERN = /\b(?:family|party|catering|group|serves?\s+\d+|feeds?\s+\d+)\b/i;
 const MEAL_PATTERN = /\b(?:combo|meal|plate|platter|bowl|box|bundle|entrée|entree|dinner|lunch|burger|sandwich|wrap|burrito|pizza|ramen|noodles?|pasta|salad)\b/i;
+const UNIT_PRICED_RESTAURANT_PATTERN = /\b(?:sushi|izakaya|tapas|dim\s*sum|small plates?)\b/i;
+const UNIT_PRICED_ITEM_PATTERN = /\b(?:nigiri|sashimi|hand roll|maki|sushi|tapas|small plates?|dim\s*sum)\b/i;
+const UNIT_PRICED_COMPLETE_MEAL_PATTERN = /\b(?:combo|combination|meal|bento|omakase|platter|entrée|entree|donburi|rice bowl|ramen|udon|noodles?|curry|lunch special|dinner special)\b/i;
+
+type MealEstimateContext = {
+  restaurantName?: string;
+};
 
 function itemText(item: MenuItem): string {
   return `${item.section ?? ""} ${item.name} ${item.description ?? ""}`;
@@ -13,7 +21,17 @@ function quantile(sorted: Array<MenuItem & { price: number }>, ratio: number): n
   return sorted[index].price;
 }
 
-export function selectTypicalMealItems(items: MenuItem[]): {
+export function selectTypicalMealItems(
+  items: MenuItem[],
+  context?: MealEstimateContext,
+): {
+  items: Array<MenuItem & { price: number }>;
+  basis: RestaurantMenuResult["priceSummary"]["basis"];
+};
+export function selectTypicalMealItems(
+  items: MenuItem[],
+  context: MealEstimateContext = {},
+): {
   items: Array<MenuItem & { price: number }>;
   basis: RestaurantMenuResult["priceSummary"]["basis"];
 } {
@@ -23,6 +41,21 @@ export function selectTypicalMealItems(items: MenuItem[]): {
   );
   const individual = priced.filter((item) => !NON_INDIVIDUAL_PATTERN.test(itemText(item)));
   const nonAccessory = individual.filter((item) => !ACCESSORY_PATTERN.test(itemText(item)));
+  const unitPricedItemCount = nonAccessory.filter((item) =>
+    UNIT_PRICED_ITEM_PATTERN.test(itemText(item)),
+  ).length;
+  const isUnitPricedMenu = UNIT_PRICED_RESTAURANT_PATTERN.test(context.restaurantName ?? "") ||
+    (unitPricedItemCount >= 3 && unitPricedItemCount / Math.max(1, nonAccessory.length) >= 0.25);
+
+  if (isUnitPricedMenu) {
+    const completeMeals = nonAccessory.filter((item) =>
+      UNIT_PRICED_COMPLETE_MEAL_PATTERN.test(itemText(item)),
+    );
+    return completeMeals.length >= 3
+      ? { items: completeMeals, basis: "explicit_meals" }
+      : { items: [], basis: "none" };
+  }
+
   const explicitMeals = nonAccessory.filter((item) => MEAL_PATTERN.test(itemText(item)));
 
   if (explicitMeals.length >= 3) {
@@ -36,8 +69,9 @@ export function selectTypicalMealItems(items: MenuItem[]): {
 
 export function summarizeTypicalMealPrices(
   items: MenuItem[],
+  context: MealEstimateContext = {},
 ): RestaurantMenuResult["priceSummary"] {
-  const selection = selectTypicalMealItems(items);
+  const selection = selectTypicalMealItems(items, context);
   const sorted = [...selection.items].sort((a, b) => a.price - b.price);
 
   if (sorted.length === 0) {
@@ -74,4 +108,19 @@ export function summarizeTypicalMealPrices(
     excludedItemCount: Math.max(0, pricedItemCount - sorted.length),
     sampleItemIds: sorted.map((item) => item.id),
   };
+}
+
+export function mealEstimateConfidence(
+  summary: RestaurantMenuResult["priceSummary"],
+): BudgetEstimateConfidence {
+  if (summary.sampleItemCount < 3) return "none";
+  if (summary.basis === "explicit_meals") return "high";
+  if (summary.basis === "filtered_menu_items") return "medium";
+  return "none";
+}
+
+export function hasReliableMealEstimate(
+  summary: RestaurantMenuResult["priceSummary"],
+): boolean {
+  return mealEstimateConfidence(summary) !== "none";
 }

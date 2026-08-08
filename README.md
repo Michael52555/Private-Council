@@ -41,7 +41,10 @@ Google-listed sources in order and stop at the first reliable priced menu.
 A successful menu replaces the Google fallback with a high-confidence typical
 meal estimate. Meal estimation prefers combos, meals, plates, bowls, and other
 main dishes while excluding add-ons, sauces, drinks, sides, and family/catering
-packages when the menu provides enough structure.
+packages when the menu provides enough structure. Unit-priced or shared-plate
+menus such as sushi, izakaya, tapas, and dim sum require explicit complete-meal
+evidence; individual pieces are never presented as a high-confidence
+per-person meal estimate.
 
 Blocked or unrecognized menus leave the Google fallback intact. Budget
 compatibility is continuous: it combines the representative meal price with
@@ -64,6 +67,10 @@ each participant's browser. The API routes use a shared SQLite database at
   agents do not repeatedly hit the same blocked provider.
 - Incrementing `menuSchemaVersion` starts a clean generation when the extraction
   or meal-estimation algorithm changes.
+
+Cached successful results retain the extracted raw menu items. Derived price
+quartiles, median, and confidence are recomputed from those items when the cache
+is read, so estimator improvements do not require another provider scrape.
 
 The SQLite file belongs to the central service, so all local agents connected to
 that service reuse the same restaurant data. In a hosted environment,
