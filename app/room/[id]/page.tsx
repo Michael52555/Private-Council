@@ -605,6 +605,32 @@ function BudgetEstimatePanel({ candidate }: { candidate: RestaurantCandidate }) 
   );
 }
 
+const ORDERING_DISCOVERY_TIMEOUT_MS = 70_000;
+const MENU_EXTRACTION_TIMEOUT_MS = 70_000;
+
+async function fetchWithTimeout(
+  input: RequestInfo | URL,
+  init: RequestInit,
+  timeoutMs: number,
+): Promise<Response> {
+  const controller = new AbortController();
+  const timeoutId = window.setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    return await fetch(input, {
+      ...init,
+      signal: controller.signal,
+    });
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") {
+      throw new Error("The menu check timed out. A cached or Google price estimate will be used when available.");
+    }
+    throw error;
+  } finally {
+    window.clearTimeout(timeoutId);
+  }
+}
+
 function renderPreferenceDetails(preference: Preference) {
 
   console.log(
@@ -921,7 +947,7 @@ export default function RoomPage() {
     }));
 
     try {
-      const discoveryResponse = await fetch(
+      const discoveryResponse = await fetchWithTimeout(
         "/api/restaurants/ordering-sources",
         {
           method: "POST",
@@ -932,6 +958,7 @@ export default function RoomPage() {
             googleMapsUri: candidate.googleMapsUri,
           }),
         },
+        ORDERING_DISCOVERY_TIMEOUT_MS,
       );
       const discovery =
         (await discoveryResponse.json()) as OrderingDiscoveryApiResponse;
@@ -1070,16 +1097,20 @@ export default function RoomPage() {
     }));
 
     try {
-      const response = await fetch("/api/restaurants/menu", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          placeId: candidate.id,
-          restaurantName: candidate.name,
-          restaurantAddress: candidate.address,
-          sources: sources.slice(0, 3),
-        }),
-      });
+      const response = await fetchWithTimeout(
+        "/api/restaurants/menu",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            placeId: candidate.id,
+            restaurantName: candidate.name,
+            restaurantAddress: candidate.address,
+            sources: sources.slice(0, 3),
+          }),
+        },
+        MENU_EXTRACTION_TIMEOUT_MS,
+      );
       const data = (await response.json()) as RestaurantMenuApiResponse;
       if (!response.ok || "error" in data) {
         throw new Error(
@@ -2080,7 +2111,7 @@ export default function RoomPage() {
                             ) : (
                             <div className="mt-6 grid gap-4 lg:grid-cols-3">
                                 {rankedCandidates.map(
-                                ({ candidate, totalScore, provisionalScore, breakdown}, index) => (
+                                ({ candidate, totalScore, breakdown}, index) => (
                                     <article
                                     key={candidate.id}
                                     className="group relative overflow-hidden rounded-2xl border border-white/10 bg-white/[0.07] p-5 backdrop-blur-sm transition hover:-translate-y-1 hover:border-purple-400/40 hover:bg-white/[0.1]"
@@ -2092,13 +2123,11 @@ export default function RoomPage() {
 
                                         <div className="flex flex-wrap justify-end gap-2">
                                           <span className="rounded-full bg-purple-500/20 px-3 py-1 text-xs font-semibold text-purple-200">
-                                            {(totalScore ?? provisionalScore) === null
-                                              ? "Score pending"
-                                              : totalScore === null
-                                                ? `Partial score ${Math.round((provisionalScore ?? 0) * 100)}%`
-                                                : breakdown.some((item) => item.status === "uncertain")
-                                                  ? `Estimated score ${Math.round(totalScore * 100)}%`
-                                                  : `Score ${Math.round(totalScore * 100)}%`}
+                                            {totalScore === null
+                                              ? `Score pending · ${breakdown.filter((item) => item.status !== "pending").length}/${breakdown.length} checked`
+                                              : breakdown.some((item) => item.status === "uncertain")
+                                                ? `Estimated score ${Math.round(totalScore * 100)}%`
+                                                : `Score ${Math.round(totalScore * 100)}%`}
                                           </span>
                                           <span className="rounded-full bg-white/10 px-3 py-1 text-xs font-semibold text-gray-200">
                                             {candidate.distanceMiles} miles
