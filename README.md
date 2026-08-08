@@ -33,18 +33,22 @@ extraction:
    implementation details. The candidate interface shows only the restaurant,
    score, distance, and estimated per-person price.
 
-After candidate generation, two workers inspect all ten restaurants. Exact menu
-extraction then runs automatically: the registered provider adapters try up to
-three Google-listed sources in order and stop at the first reliable priced menu.
+Candidate generation can return up to twenty restaurants. Cached menu results
+are joined into that initial response in one database query, so known places are
+scored immediately and never enter the scraper queue. Three bounded workers
+inspect only cache misses. The registered provider adapters try up to three
+Google-listed sources in order and stop at the first reliable priced menu.
 A successful menu replaces the Google fallback with a high-confidence typical
 meal estimate. Meal estimation prefers combos, meals, plates, bowls, and other
 main dishes while excluding add-ons, sauces, drinks, sides, and family/catering
 packages when the menu provides enough structure.
 
-Blocked or unrecognized menus leave the Google fallback intact. Google ranges
-are used only for clear within-budget or outside-budget decisions; partial
-overlaps remain uncertain instead of producing a falsely precise percentage. If
-neither source provides numeric prices, budget scoring remains pending.
+Blocked or unrecognized menus leave the Google fallback intact. Budget
+compatibility is continuous: it combines the representative meal price with
+the overlap between the restaurant and requested ranges. Google numeric ranges
+receive less scoring weight than menu data, and coarse Google price levels
+receive still less. If neither source provides numeric prices, the UI shows a
+partial score from the preferences that can be evaluated.
 
 ## Central restaurant cache
 
@@ -85,8 +89,8 @@ Optional central cache configuration:
 
 During local development, an installed macOS/Windows/Linux Chrome or Chromium is
 detected automatically. In a hosted environment, set `PLAYWRIGHT_WS_ENDPOINT`.
-Without a browser, Google Maps button interaction returns a visible diagnostic;
-the restaurant website is shown only as an uncounted fallback.
+Without a browser, Google Maps interaction fails quietly behind the central API
+and the candidate falls back to available Google price evidence.
 
 ## Quality checks
 

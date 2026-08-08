@@ -19,6 +19,7 @@ type BudgetScoreEvaluation = Pick<ScoreBreakdownItem, "score" | "status">;
 
 export type RestaurantScore = {
   totalScore: number | null;
+  provisionalScore: number | null;
   breakdown: ScoreBreakdownItem[];
 };
 
@@ -50,20 +51,48 @@ export function evaluateBudgetScore(
     return null;
   }
 
-  if (restaurantMax <= restaurantMin) {
-    return restaurantMin >= minBudget &&
-      restaurantMin <= maxBudget
-      ? 1
-      : 0;
-  }
+  const normalizedRestaurantMin = Math.min(restaurantMin, restaurantMax);
+  const normalizedRestaurantMax = Math.max(restaurantMin, restaurantMax);
+  const normalizedBudgetMin = Math.min(minBudget, maxBudget);
+  const normalizedBudgetMax = Math.max(minBudget, maxBudget);
+
+  if (
+    normalizedRestaurantMin >= normalizedBudgetMin &&
+    normalizedRestaurantMax <= normalizedBudgetMax
+  ) return 1;
 
   const overlap = Math.max(
     0,
-    Math.min(maxBudget, restaurantMax) -
-      Math.max(minBudget, restaurantMin),
+    Math.min(normalizedBudgetMax, normalizedRestaurantMax) -
+      Math.max(normalizedBudgetMin, normalizedRestaurantMin),
   );
+  const restaurantWidth = normalizedRestaurantMax - normalizedRestaurantMin;
+  const overlapFraction = restaurantWidth > 0 ? overlap / restaurantWidth : 0;
+  const representativePrice = typeof candidate.pricePerPerson === "number"
+    ? candidate.pricePerPerson
+    : (normalizedRestaurantMin + normalizedRestaurantMax) / 2;
+  const distanceFromBudget = representativePrice < normalizedBudgetMin
+    ? normalizedBudgetMin - representativePrice
+    : representativePrice > normalizedBudgetMax
+      ? representativePrice - normalizedBudgetMax
+      : 0;
+  const budgetWidth = Math.max(1, normalizedBudgetMax - normalizedBudgetMin);
+  const distanceScale = Math.max(5, budgetWidth / 4);
+  const representativeScore = distanceFromBudget === 0
+    ? 1
+    : Math.exp(-distanceFromBudget / distanceScale);
 
-  return overlap / (restaurantMax - restaurantMin);
+  return Math.max(
+    0,
+    Math.min(1, 0.7 * representativeScore + 0.3 * overlapFraction),
+  );
+}
+
+export function budgetEvidenceWeight(candidate: RestaurantCandidate): number {
+  if (candidate.budgetEstimateSource === "menu") return 1;
+  if (candidate.budgetEstimateSource === "google_price_range") return 0.65;
+  if (candidate.budgetEstimateSource === "google_price_level") return 0.35;
+  return 0;
 }
 
 export function evaluateBudgetScoreWithConfidence(
@@ -83,20 +112,10 @@ export function evaluateBudgetScoreWithConfidence(
     return { score: null, status: "pending" };
   }
 
-  if (candidate.budgetEstimateSource === "menu") {
-    return {
-      score: evaluateBudgetScore(candidate, minBudget, maxBudget),
-      status: "ready",
-    };
-  }
-
-  if (restaurantMax < minBudget || restaurantMin > maxBudget) {
-    return { score: 0, status: "ready" };
-  }
-  if (restaurantMin >= minBudget && restaurantMax <= maxBudget) {
-    return { score: 1, status: "ready" };
-  }
-  return { score: null, status: "uncertain" };
+  return {
+    score: evaluateBudgetScore(candidate, minBudget, maxBudget),
+    status: candidate.budgetEstimateSource === "menu" ? "ready" : "uncertain",
+  };
 }
 
 function isConfirmed(preference: Preference | undefined): boolean {
@@ -178,20 +197,19 @@ export function evaluateRestaurantScore(
       scores.push({
         category: "budget",
         score: budgetEvaluation.score,
-        weight: importanceWeight(
-          budgetPreference.importance,
-        ),
+        weight:
+          importanceWeight(budgetPreference.importance) *
+          budgetEvidenceWeight(candidate),
       });
     }
   }
 
-  const hasUnresolvedRequiredScore =
-    breakdown.some((item) => item.status !== "ready");
+  const hasPendingScore = breakdown.some((item) => item.status === "pending");
+  const provisionalScore = scores.length > 0 ? combineScores(scores) : null;
 
   return {
-    totalScore: hasUnresolvedRequiredScore
-      ? null
-      : combineScores(scores),
+    totalScore: hasPendingScore ? null : provisionalScore,
+    provisionalScore,
     breakdown,
   };
 }

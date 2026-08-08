@@ -5,6 +5,7 @@ import {
   storeMenuFailure,
   storeMenuSuccessOnce,
 } from "@/lib/menu/database-cache";
+import { runSingleFlight } from "@/lib/menu/singleflight";
 import type { OrderingSource } from "@/lib/menu/types";
 
 export const runtime = "nodejs";
@@ -75,41 +76,51 @@ export async function POST(request: Request) {
       );
     }
 
-    let result;
-    try {
-      result = await extractRestaurantMenus({
-        placeId,
-        restaurantName: typeof body.restaurantName === "string" ? body.restaurantName.trim() : undefined,
-        restaurantAddress: typeof body.restaurantAddress === "string"
-          ? body.restaurantAddress.trim().slice(0, 500)
-          : undefined,
-        sources,
-      });
-    } catch (error) {
+    const result = await runSingleFlight(`menu:${placeId}`, async () => {
       try {
-        storeMenuFailure(
+        const cacheRecheck = readMenuCache(placeId);
+        if (cacheRecheck.status === "success") return cacheRecheck.result;
+      } catch (cacheError) {
+        console.warn("Menu cache recheck failed:", cacheError);
+      }
+
+      let freshResult;
+      try {
+        freshResult = await extractRestaurantMenus({
           placeId,
+          restaurantName: typeof body.restaurantName === "string" ? body.restaurantName.trim() : undefined,
+          restaurantAddress: typeof body.restaurantAddress === "string"
+            ? body.restaurantAddress.trim().slice(0, 500)
+            : undefined,
           sources,
-          error instanceof Error ? error.message : "Could not extract the restaurant menu.",
-        );
-      } catch (cacheError) {
-        console.warn("Menu failure cache write failed:", cacheError);
+        });
+      } catch (error) {
+        try {
+          storeMenuFailure(
+            placeId,
+            sources,
+            error instanceof Error ? error.message : "Could not extract the restaurant menu.",
+          );
+        } catch (cacheError) {
+          console.warn("Menu failure cache write failed:", cacheError);
+        }
+        throw error;
       }
-      throw error;
-    }
-    if (result.priceSummary.sampleItemCount >= 3) {
-      try {
-        storeMenuSuccessOnce(placeId, sources, result);
-      } catch (cacheError) {
-        console.warn("Menu cache write failed; returning fresh data:", cacheError);
+      if (freshResult.priceSummary.sampleItemCount >= 3) {
+        try {
+          storeMenuSuccessOnce(placeId, sources, freshResult);
+        } catch (cacheError) {
+          console.warn("Menu cache write failed; returning fresh data:", cacheError);
+        }
+      } else {
+        try {
+          storeMenuFailure(placeId, sources, "No reliable menu-price sample was found recently.");
+        } catch (cacheError) {
+          console.warn("Menu failure cache write failed:", cacheError);
+        }
       }
-    } else {
-      try {
-        storeMenuFailure(placeId, sources, "No reliable menu-price sample was found recently.");
-      } catch (cacheError) {
-        console.warn("Menu failure cache write failed:", cacheError);
-      }
-    }
+      return freshResult;
+    });
     return NextResponse.json(result, {
       headers: { "X-Restaurant-Cache": "MISS" },
     });

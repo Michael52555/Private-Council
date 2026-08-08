@@ -5,8 +5,14 @@ import type {
   RestaurantCandidate,
 } from "@/lib/planning-types";
 import {
+  evaluateBudgetScore,
   evaluateRestaurantScore,
 } from "@/lib/scoring";
+
+function assertClose(actual: number | null, expected: number): void {
+  assert.equal(typeof actual, "number");
+  assert.ok(Math.abs((actual as number) - expected) < 1e-9);
+}
 
 const preferences: Preference[] = [
   {
@@ -78,6 +84,7 @@ test("keeps the restaurant score pending before menu prices load", () => {
   );
 
   assert.equal(score.totalScore, null);
+  assert.equal(score.provisionalScore, 1);
   assert.deepEqual(score.breakdown, [
     { category: "distance", score: 1, status: "ready" },
     { category: "budget", score: null, status: "pending" },
@@ -117,11 +124,11 @@ test("scores the budget only after menu-derived prices load", () => {
     preferences,
   );
 
-  assert.equal(score.breakdown[1].score, 25 / 30);
-  assert.equal(score.totalScore, (1 + 25 / 30) / 2);
+  assertClose(score.breakdown[1].score, 0.95);
+  assertClose(score.totalScore, 0.975);
 });
 
-test("marks a partially overlapping Google fallback as uncertain", () => {
+test("scores a partially overlapping Google fallback with reduced evidence weight", () => {
   const score = evaluateRestaurantScore(
     candidate({
       estimatedPriceMin: 15,
@@ -142,11 +149,11 @@ test("marks a partially overlapping Google fallback as uncertain", () => {
   );
 
   assert.equal(score.breakdown[1].status, "uncertain");
-  assert.equal(score.breakdown[1].score, null);
-  assert.equal(score.totalScore, null);
+  assertClose(score.breakdown[1].score, 0.88);
+  assertClose(score.totalScore, (1 + 0.88 * 0.35) / 1.35);
 });
 
-test("uses Google fallback for clear within-budget and outside-budget decisions", () => {
+test("uses a continuous penalty for Google prices outside the budget", () => {
   const googleCandidate = candidate({
     estimatedPriceMin: 10,
     estimatedPriceMax: 20,
@@ -163,8 +170,10 @@ test("uses Google fallback for clear within-budget and outside-budget decisions"
   });
 
   const within = evaluateRestaurantScore(googleCandidate, preferences);
-  assert.equal(within.breakdown[1].status, "ready");
-  assert.equal(within.breakdown[1].score, 0);
+  const expectedBudgetScore = evaluateBudgetScore(googleCandidate, 25, 50);
+  assert.equal(within.breakdown[1].status, "uncertain");
+  assertClose(within.breakdown[1].score, expectedBudgetScore as number);
+  assertClose(within.totalScore, (1 + (expectedBudgetScore as number) * 0.65) / 1.65);
 
   const wideBudget = preferences.map((preference) => preference.category === "budget"
     ? {
@@ -179,6 +188,7 @@ test("uses Google fallback for clear within-budget and outside-budget decisions"
       }
     : preference);
   const covered = evaluateRestaurantScore(googleCandidate, wideBudget);
-  assert.equal(covered.breakdown[1].status, "ready");
+  assert.equal(covered.breakdown[1].status, "uncertain");
   assert.equal(covered.breakdown[1].score, 1);
+  assert.equal(covered.totalScore, 1);
 });

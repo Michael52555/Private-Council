@@ -7,6 +7,7 @@ import type { OrderingSource, RestaurantMenuResult } from "@/lib/menu/types";
 import {
   menuSourceFingerprint,
   readMenuCache,
+  readSuccessfulMenuCacheBatch,
   storeMenuSuccessOnce,
 } from "@/lib/menu/database-cache";
 
@@ -67,4 +68,8 @@ test("the central database keeps the first reliable menu result", () => {
   if (cached.status === "success") {
     assert.equal(cached.result.priceSummary.median, 12);
   }
+
+  const batch = readSuccessfulMenuCacheBatch(["place-first-result", "missing-place"]);
+  assert.equal(batch.size, 1);
+  assert.equal(batch.get("place-first-result")?.result.priceSummary.median, 12);
 });

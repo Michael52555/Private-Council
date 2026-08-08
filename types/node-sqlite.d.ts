@@ -1,5 +1,6 @@
 declare module "node:sqlite" {
   export class StatementSync {
+    all(...anonymousParameters: unknown[]): unknown[];
     get(...anonymousParameters: unknown[]): unknown;
     run(...anonymousParameters: unknown[]): unknown;
   }

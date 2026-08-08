@@ -3,6 +3,7 @@ import {
   googleBudgetEstimate,
   type GooglePriceRange,
 } from "@/lib/budget-estimate";
+import { readSuccessfulMenuCacheBatch } from "@/lib/menu/database-cache";
 import type { RestaurantCandidate } from "@/lib/planning-types";
 
 type GeocodedOrigin = {
@@ -117,7 +118,7 @@ async function searchNearbyRestaurants(
     },
     body: JSON.stringify({
       includedTypes: ["restaurant"],
-      maxResultCount: 10,
+      maxResultCount: 20,
       rankPreference: "DISTANCE",
       locationRestriction: {
         circle: {
@@ -226,12 +227,38 @@ export async function POST(request: Request) {
       geocodedOrigin,
       Math.round(radiusMiles * 1609.344),
     );
+
+    let cachedMenus: ReturnType<typeof readSuccessfulMenuCacheBatch> = new Map();
+    try {
+      cachedMenus = readSuccessfulMenuCacheBatch(candidates.map((candidate) => candidate.id));
+    } catch (cacheError) {
+      console.warn("Candidate price-cache lookup failed; continuing without cache:", cacheError);
+    }
+
+    const hydratedCandidates = candidates.map((candidate) => {
+      const cachedMenu = cachedMenus.get(candidate.id)?.result;
+      if (!cachedMenu || cachedMenu.priceSummary.sampleItemCount < 3) return candidate;
+      return {
+        ...candidate,
+        estimatedPriceMin:
+          cachedMenu.priceSummary.lowerQuartile ?? cachedMenu.priceSummary.minimum,
+        estimatedPriceMax:
+          cachedMenu.priceSummary.upperQuartile ?? cachedMenu.priceSummary.maximum,
+        pricePerPerson: cachedMenu.priceSummary.median,
+        budgetEstimateSource: "menu" as const,
+        budgetEstimateConfidence: "high" as const,
+        budgetEstimateCurrency: cachedMenu.priceSummary.currency ?? "USD",
+        menuStatus: "loaded" as const,
+        menuItemCount: cachedMenu.items.length,
+      };
+    });
     return NextResponse.json({
-      candidates,
+      candidates: hydratedCandidates,
       meta: {
         originResolved: true,
         formattedOrigin: geocodedOrigin.formattedAddress,
-        menuEnrichmentRequired: true,
+        cachedMenuCount: cachedMenus.size,
+        menuEnrichmentRequired: cachedMenus.size < candidates.length,
       },
     });
   } catch (error) {

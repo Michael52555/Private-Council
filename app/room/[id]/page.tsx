@@ -544,8 +544,11 @@ function BudgetEstimatePanel({ candidate }: { candidate: RestaurantCandidate }) 
   const minimum = candidate.estimatedPriceMin;
   const maximum = candidate.estimatedPriceMax;
   const hasRange = typeof minimum === "number" && typeof maximum === "number";
+  const displaysAsSinglePrice = hasRange && minimum.toFixed(2) === maximum.toFixed(2);
   const sourceLabel = candidate.budgetEstimateSource === "menu"
-    ? "Menu-derived typical meal range"
+    ? displaysAsSinglePrice
+      ? "Menu-derived typical meal price"
+      : "Menu-derived typical meal range"
     : candidate.budgetEstimateSource === "google_price_range"
       ? "Google price range"
       : candidate.budgetEstimateSource === "google_price_level"
@@ -584,7 +587,9 @@ function BudgetEstimatePanel({ candidate }: { candidate: RestaurantCandidate }) 
       </div>
       {hasRange ? (
         <p className="mt-2 text-sm font-semibold text-white">
-          {currencyPrefix}{minimum.toFixed(2)}–{currencyPrefix}{maximum.toFixed(2)} per person
+          {displaysAsSinglePrice
+            ? `${currencyPrefix}${minimum.toFixed(2)} per person`
+            : `${currencyPrefix}${minimum.toFixed(2)}–${currencyPrefix}${maximum.toFixed(2)} per person`}
         </p>
       ) : (
         <p className="mt-2 leading-5 text-amber-200/80">
@@ -1020,6 +1025,13 @@ export default function RoomPage() {
           return;
         }
 
+        if (
+          candidate.menuStatus === "loaded" &&
+          candidate.budgetEstimateSource === "menu"
+        ) {
+          continue;
+        }
+
         await handleDiscoverOrderingSources(
           candidate,
           enrichmentRun,
@@ -1027,7 +1039,7 @@ export default function RoomPage() {
       }
     }
 
-    await Promise.all([worker(), worker()]);
+    await Promise.all([worker(), worker(), worker()]);
   }
 
   async function handleExtractPrimaryMenu(
@@ -2068,7 +2080,7 @@ export default function RoomPage() {
                             ) : (
                             <div className="mt-6 grid gap-4 lg:grid-cols-3">
                                 {rankedCandidates.map(
-                                ({ candidate, totalScore, breakdown}, index) => (
+                                ({ candidate, totalScore, provisionalScore, breakdown}, index) => (
                                     <article
                                     key={candidate.id}
                                     className="group relative overflow-hidden rounded-2xl border border-white/10 bg-white/[0.07] p-5 backdrop-blur-sm transition hover:-translate-y-1 hover:border-purple-400/40 hover:bg-white/[0.1]"
@@ -2080,11 +2092,13 @@ export default function RoomPage() {
 
                                         <div className="flex flex-wrap justify-end gap-2">
                                           <span className="rounded-full bg-purple-500/20 px-3 py-1 text-xs font-semibold text-purple-200">
-                                            {totalScore === null
-                                              ? breakdown.some((item) => item.status === "uncertain")
-                                                ? "Score uncertain"
-                                                : "Score pending"
-                                              : `Score ${Math.round(totalScore * 100)}%`}
+                                            {(totalScore ?? provisionalScore) === null
+                                              ? "Score pending"
+                                              : totalScore === null
+                                                ? `Partial score ${Math.round((provisionalScore ?? 0) * 100)}%`
+                                                : breakdown.some((item) => item.status === "uncertain")
+                                                  ? `Estimated score ${Math.round(totalScore * 100)}%`
+                                                  : `Score ${Math.round(totalScore * 100)}%`}
                                           </span>
                                           <span className="rounded-full bg-white/10 px-3 py-1 text-xs font-semibold text-gray-200">
                                             {candidate.distanceMiles} miles

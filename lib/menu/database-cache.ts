@@ -24,6 +24,11 @@ export type MenuCacheLookup =
   | { status: "recent_failure"; reason: string; retryAfter: string }
   | { status: "miss" };
 
+export type SuccessfulMenuCacheValue = {
+  result: RestaurantMenuResult;
+  storedAt: string;
+};
+
 type CacheDatabaseGlobal = typeof globalThis & {
   restaurantCacheDatabase?: DatabaseSync;
 };
@@ -166,6 +171,31 @@ export function readMenuCache(placeId: string): MenuCacheLookup {
     WHERE place_id = ? AND schema_version = ? AND status = 'failure'
   `).run(placeId, menuSchemaVersion);
   return { status: "miss" };
+}
+
+export function readSuccessfulMenuCacheBatch(
+  placeIds: string[],
+): Map<string, SuccessfulMenuCacheValue> {
+  const uniquePlaceIds = [...new Set(placeIds.filter(Boolean))].slice(0, 100);
+  if (uniquePlaceIds.length === 0) return new Map();
+
+  const placeholders = uniquePlaceIds.map(() => "?").join(", ");
+  const rows = database().prepare(`
+    SELECT place_id, result_json, stored_at
+    FROM restaurant_menu_cache
+    WHERE schema_version = ?
+      AND status = 'success'
+      AND place_id IN (${placeholders})
+  `).all(menuSchemaVersion, ...uniquePlaceIds) as Array<Record<string, unknown>>;
+
+  const results = new Map<string, SuccessfulMenuCacheValue>();
+  for (const row of rows) {
+    if (typeof row.place_id !== "string" || typeof row.stored_at !== "string") continue;
+    const result = parseJson<RestaurantMenuResult>(row.result_json);
+    if (!result) continue;
+    results.set(row.place_id, { result, storedAt: row.stored_at });
+  }
+  return results;
 }
 
 export function storeMenuSuccessOnce(

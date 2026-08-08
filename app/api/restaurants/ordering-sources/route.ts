@@ -4,6 +4,7 @@ import {
   readOrderingDiscoveryCache,
   storeOrderingDiscoveryCache,
 } from "@/lib/menu/database-cache";
+import { runSingleFlight } from "@/lib/menu/singleflight";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -32,16 +33,26 @@ export async function POST(request: Request) {
       });
     }
 
-    const result = await discoverOrderingSources({
-      placeId,
-      websiteUri: typeof body.websiteUri === "string" ? body.websiteUri : undefined,
-      googleMapsUri: typeof body.googleMapsUri === "string" ? body.googleMapsUri : undefined,
+    const result = await runSingleFlight(`ordering:${placeId}`, async () => {
+      try {
+        const cacheRecheck = readOrderingDiscoveryCache(placeId);
+        if (cacheRecheck) return cacheRecheck;
+      } catch (cacheError) {
+        console.warn("Ordering cache recheck failed:", cacheError);
+      }
+
+      const freshResult = await discoverOrderingSources({
+        placeId,
+        websiteUri: typeof body.websiteUri === "string" ? body.websiteUri : undefined,
+        googleMapsUri: typeof body.googleMapsUri === "string" ? body.googleMapsUri : undefined,
+      });
+      try {
+        storeOrderingDiscoveryCache(placeId, freshResult);
+      } catch (cacheError) {
+        console.warn("Ordering cache write failed; returning fresh data:", cacheError);
+      }
+      return freshResult;
     });
-    try {
-      storeOrderingDiscoveryCache(placeId, result);
-    } catch (cacheError) {
-      console.warn("Ordering cache write failed; returning fresh data:", cacheError);
-    }
     return NextResponse.json(result, {
       headers: { "X-Restaurant-Cache": "MISS" },
     });
