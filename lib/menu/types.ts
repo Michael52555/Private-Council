@@ -81,6 +81,14 @@ export type ExtractedMenu = {
   warnings: string[];
 };
 
+export type MealPattern =
+  | "combo_dominant"
+  | "single_main"
+  | "main_plus_sides"
+  | "multiple_small_plates"
+  | "shared_dishes"
+  | "unit_items";
+
 export type RestaurantMenuResult = {
   placeId: string;
   restaurantName?: string;
@@ -93,7 +101,15 @@ export type RestaurantMenuResult = {
     upperQuartile: number | null;
     median: number | null;
     currency: string | null;
-    basis: "explicit_meals" | "filtered_menu_items" | "all_priced_items" | "none";
+    basis:
+      | "explicit_meals"
+      | "composed_basket"
+      | "filtered_menu_items"
+      | "all_priced_items"
+      | "none";
+    confidence?: "high" | "medium" | "low" | "none";
+    mealPattern?: MealPattern;
+    composed?: boolean;
     sampleItemCount: number;
     excludedItemCount: number;
     sampleItemIds: string[];

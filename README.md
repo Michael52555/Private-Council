@@ -38,13 +38,21 @@ are joined into that initial response in one database query, so known places are
 scored immediately and never enter the scraper queue. Three bounded workers
 inspect only cache misses. The registered provider adapters try up to three
 Google-listed sources in order and stop at the first reliable priced menu.
-A successful menu replaces the Google fallback with a high-confidence typical
-meal estimate. Meal estimation prefers combos, meals, plates, bowls, and other
-main dishes while excluding add-ons, sauces, drinks, sides, and family/catering
-packages when the menu provides enough structure. Unit-priced or shared-plate
-menus such as sushi, izakaya, tapas, and dim sum require explicit complete-meal
-evidence; individual pieces are never presented as a high-confidence
-per-person meal estimate.
+A successful menu can replace the Google fallback with a typical per-person
+meal estimate. The estimator classifies raw menu items into complete meals,
+mains, shared mains, small plates, sides, drinks, desserts, unit-priced items,
+and accessories. It then applies one bounded composition template: a direct
+combo price, one main with an optional side and drink, two to three small
+plates, or several shared dishes divided across the party. It never enumerates
+arbitrary item combinations, so work remains linear in menu size. Family and
+catering packages are excluded from single-person templates. Unit-priced sushi
+pieces are not mistaken for a full meal unless the menu also exposes enough
+complete meals.
+
+Composition confidence affects ranking weight: direct meals and clear mains
+carry more weight than inferred shared-plate baskets. A menu estimate that is
+implausibly far outside Google's numeric range is rejected in favor of the
+Google fallback.
 
 Blocked or unrecognized menus leave the Google fallback intact. Budget
 compatibility is continuous: it combines the representative meal price with

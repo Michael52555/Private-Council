@@ -89,7 +89,12 @@ export function evaluateBudgetScore(
 }
 
 export function budgetEvidenceWeight(candidate: RestaurantCandidate): number {
-  if (candidate.budgetEstimateSource === "menu") return 1;
+  if (candidate.budgetEstimateSource === "menu") {
+    if (candidate.budgetEstimateConfidence === "high") return 1;
+    if (candidate.budgetEstimateConfidence === "medium") return 0.75;
+    if (candidate.budgetEstimateConfidence === "low") return 0.45;
+    return 0;
+  }
   if (candidate.budgetEstimateSource === "google_price_range") return 0.65;
   if (candidate.budgetEstimateSource === "google_price_level") return 0.35;
   return 0;
@@ -114,7 +119,11 @@ export function evaluateBudgetScoreWithConfidence(
 
   return {
     score: evaluateBudgetScore(candidate, minBudget, maxBudget),
-    status: candidate.budgetEstimateSource === "menu" ? "ready" : "uncertain",
+    status:
+      candidate.budgetEstimateSource === "menu" &&
+      candidate.budgetEstimateConfidence !== "low"
+        ? "ready"
+        : "uncertain",
   };
 }
 

@@ -6,6 +6,7 @@ import {
 import { readSuccessfulMenuCacheBatch } from "@/lib/menu/database-cache";
 import {
   hasReliableMealEstimate,
+  isMenuEstimatePlausibleAgainstGoogle,
   mealEstimateConfidence,
 } from "@/lib/menu/meal-estimate";
 import type { RestaurantCandidate } from "@/lib/planning-types";
@@ -242,7 +243,14 @@ export async function POST(request: Request) {
     const hydratedCandidates = candidates.map((candidate) => {
       const cachedMenu = cachedMenus.get(candidate.id)?.result;
       if (!cachedMenu) return candidate;
-      if (!hasReliableMealEstimate(cachedMenu.priceSummary)) {
+      const usableMenuEstimate =
+        hasReliableMealEstimate(cachedMenu.priceSummary) &&
+        isMenuEstimatePlausibleAgainstGoogle(
+          cachedMenu.priceSummary,
+          candidate.googleEstimatedPriceMin,
+          candidate.googleEstimatedPriceMax,
+        );
+      if (!usableMenuEstimate) {
         return {
           ...candidate,
           menuStatus: "loaded" as const,

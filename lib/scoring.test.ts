@@ -128,6 +128,24 @@ test("scores the budget only after menu-derived prices load", () => {
   assertClose(score.totalScore, 0.975);
 });
 
+test("reduces the influence of a low-confidence composed menu estimate", () => {
+  const lowConfidenceCandidate = candidate({
+    estimatedPriceMin: 20,
+    estimatedPriceMax: 50,
+    pricePerPerson: 35,
+    budgetEstimateSource: "menu",
+    budgetEstimateConfidence: "low",
+    budgetEstimateCurrency: "USD",
+    menuStatus: "loaded",
+    menuItemCount: 20,
+  });
+  const score = evaluateRestaurantScore(lowConfidenceCandidate, preferences);
+
+  assertClose(score.breakdown[1].score, 0.95);
+  assert.equal(score.breakdown[1].status, "uncertain");
+  assertClose(score.totalScore, (1 + 0.95 * 0.45) / 1.45);
+});
+
 test("scores a partially overlapping Google fallback with reduced evidence weight", () => {
   const score = evaluateRestaurantScore(
     candidate({

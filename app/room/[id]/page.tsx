@@ -23,6 +23,7 @@ import {
 } from "@/lib/menu/survey";
 import {
   hasReliableMealEstimate,
+  isMenuEstimatePlausibleAgainstGoogle,
   mealEstimateConfidence,
 } from "@/lib/menu/meal-estimate";
 
@@ -1135,35 +1136,40 @@ export default function RoomPage() {
         [candidate.id]: { status: "success", result: data },
       }));
 
-      const hasReliablePriceSample = hasReliableMealEstimate(data.priceSummary);
       setCandidates((current) =>
-        current.map((entry) =>
-          entry.id === candidate.id
-            ? {
-                ...entry,
-                estimatedPriceMin: hasReliablePriceSample
-                  ? data.priceSummary.lowerQuartile ?? data.priceSummary.minimum
-                  : entry.googleEstimatedPriceMin,
-                estimatedPriceMax: hasReliablePriceSample
-                  ? data.priceSummary.upperQuartile ?? data.priceSummary.maximum
-                  : entry.googleEstimatedPriceMax,
-                pricePerPerson: hasReliablePriceSample
-                  ? data.priceSummary.median
-                  : entry.googleEstimatedPriceMidpoint,
-                budgetEstimateSource: hasReliablePriceSample
-                  ? "menu"
-                  : entry.googleBudgetEstimateSource,
-                budgetEstimateConfidence: hasReliablePriceSample
-                  ? mealEstimateConfidence(data.priceSummary)
-                  : entry.googleBudgetEstimateConfidence,
-                budgetEstimateCurrency: hasReliablePriceSample
-                  ? data.priceSummary.currency ?? "USD"
-                  : entry.googleBudgetEstimateCurrency,
-                menuStatus: "loaded",
-                menuItemCount: data.items.length,
-              }
-            : entry,
-        ),
+        current.map((entry) => {
+          if (entry.id !== candidate.id) return entry;
+          const hasReliablePriceSample =
+            hasReliableMealEstimate(data.priceSummary) &&
+            isMenuEstimatePlausibleAgainstGoogle(
+              data.priceSummary,
+              entry.googleEstimatedPriceMin,
+              entry.googleEstimatedPriceMax,
+            );
+          return {
+            ...entry,
+            estimatedPriceMin: hasReliablePriceSample
+              ? data.priceSummary.lowerQuartile ?? data.priceSummary.minimum
+              : entry.googleEstimatedPriceMin,
+            estimatedPriceMax: hasReliablePriceSample
+              ? data.priceSummary.upperQuartile ?? data.priceSummary.maximum
+              : entry.googleEstimatedPriceMax,
+            pricePerPerson: hasReliablePriceSample
+              ? data.priceSummary.median
+              : entry.googleEstimatedPriceMidpoint,
+            budgetEstimateSource: hasReliablePriceSample
+              ? "menu"
+              : entry.googleBudgetEstimateSource,
+            budgetEstimateConfidence: hasReliablePriceSample
+              ? mealEstimateConfidence(data.priceSummary)
+              : entry.googleBudgetEstimateConfidence,
+            budgetEstimateCurrency: hasReliablePriceSample
+              ? data.priceSummary.currency ?? "USD"
+              : entry.googleBudgetEstimateCurrency,
+            menuStatus: "loaded",
+            menuItemCount: data.items.length,
+          };
+        }),
       );
     } catch (error) {
       setCandidates((current) =>
