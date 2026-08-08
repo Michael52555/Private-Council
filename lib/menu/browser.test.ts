@@ -49,10 +49,35 @@ test("preserves all supported ordering links for runtime fallback", () => {
   ]);
 
   assert.deepEqual(selected.map((candidate) => candidate.text), [
-    "Panda pickup",
     "DoorDash delivery",
     "Grubhub delivery",
   ]);
+});
+
+test("skips a chain website and chooses the first major provider in Google order", () => {
+  const selected = selectSupportedOrderingLinks([
+    {
+      href: "https://order.chick-fil-a.com/load-dot-com?locationNumber=03260",
+      text: "Chick-fil-A pickup",
+    },
+    {
+      href: "https://www.doordash.com/store/chick-fil-a-123",
+      text: "DoorDash delivery",
+    },
+    {
+      href: "https://www.ubereats.com/store/chick-fil-a/example",
+      text: "Uber Eats delivery",
+    },
+  ]);
+
+  assert.deepEqual(selected.map((candidate) => candidate.text), [
+    "DoorDash delivery",
+    "Uber Eats delivery",
+  ]);
+  assert.equal(
+    selectFirstSupportedOrderingLink(selected)?.text,
+    "DoorDash delivery",
+  );
 });
 
 test("keeps custom provider links when they are scoped to the Google ordering dialog", () => {

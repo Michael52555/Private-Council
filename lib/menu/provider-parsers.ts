@@ -77,50 +77,6 @@ const PROVIDER_SCHEMAS: Record<MenuAdapterId, ProviderSchema> = {
   },
 };
 
-export function providerOrderingEntryUrl(
-  html: string,
-  source: OrderingSource,
-  adapterId: MenuAdapterId,
-): string {
-  if (adapterId !== "chick_fil_a") return source.url;
-
-  try {
-    const sourceUrl = new URL(source.url);
-    if (
-      sourceUrl.hostname === "order.chick-fil-a.com" ||
-      sourceUrl.hostname.endsWith(".order.chick-fil-a.com")
-    ) {
-      return sourceUrl.toString();
-    }
-  } catch {
-    return source.url;
-  }
-
-  const $ = cheerio.load(html);
-  let orderingUrl: string | undefined;
-  $("a[href]").each((_index, element) => {
-    if (orderingUrl) return;
-    const href = $(element).attr("href");
-    if (!href) return;
-    try {
-      const candidate = new URL(href, source.url);
-      const isOfficialOrderHost =
-        candidate.hostname === "order.chick-fil-a.com" ||
-        candidate.hostname.endsWith(".order.chick-fil-a.com");
-      if (
-        isOfficialOrderHost &&
-        /^\/load-dot-com\/?$/i.test(candidate.pathname) &&
-        candidate.searchParams.has("locationNumber")
-      ) {
-        orderingUrl = candidate.toString();
-      }
-    } catch {
-      // Ignore malformed location-page links and keep scanning.
-    }
-  });
-  return orderingUrl ?? source.url;
-}
-
 function isObject(value: unknown): value is JsonObject {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }

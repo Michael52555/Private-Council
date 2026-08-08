@@ -3,7 +3,6 @@ import test from "node:test";
 import {
   extractProviderMenuFromHtml,
   extractProviderMenuFromJson,
-  providerOrderingEntryUrl,
 } from "@/lib/menu/provider-parsers";
 import { makeOrderingSource } from "@/lib/menu/providers";
 
@@ -90,26 +89,6 @@ test("extracts chain menu products from Panda, Habit, and Taco payload shapes", 
     assert.equal(result.items[0]?.price, 11.25);
     assert.equal(result.items[0]?.section, "Featured");
   }
-});
-
-test("resolves a Chick-fil-A location page to its store-specific ordering app", () => {
-  const source = makeOrderingSource({
-    url: "https://www.chick-fil-a.com/locations/ca/university-center-irvine",
-    discoveredFrom: "google_maps",
-  });
-  const result = providerOrderingEntryUrl(`
-    <a href="https://order.chick-fil-a.com/load-catering?locationNumber=03260">
-      Order catering
-    </a>
-    <a href="https://order.chick-fil-a.com/load-dot-com?locationNumber=03260">
-      Order pickup
-    </a>
-  `, source, "chick_fil_a");
-
-  assert.equal(
-    result,
-    "https://order.chick-fil-a.com/load-dot-com?locationNumber=03260",
-  );
 });
 
 test("applies the provider schema to embedded Taco Bell state", () => {

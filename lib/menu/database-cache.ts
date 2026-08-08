@@ -11,7 +11,7 @@ import {
   summarizeTypicalMealPrices,
 } from "@/lib/menu/meal-estimate";
 
-const orderingSchemaVersion = 3;
+const orderingSchemaVersion = 4;
 export const menuSchemaVersion = 1;
 const menuAttemptVersion = 4;
 const orderingSuccessLifetimeMs = 14 * 24 * 60 * 60 * 1000;

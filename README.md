@@ -36,14 +36,11 @@ extraction:
 Candidate generation can return up to twenty restaurants. Cached menu results
 are joined into that initial response in one database query, so known places are
 scored immediately and never enter the scraper queue. Three bounded workers
-inspect only cache misses. The registered provider adapters, including major
-platforms and supported first-party chains such as Chick-fil-A, try up to three
-Google-listed sources in order and stop at the first reliable priced menu.
-For Chick-fil-A, a Google-listed location page is resolved through its
-`locationNumber` pickup link before the browser opens the store-specific ordering
-application. If a direct request cannot read that page, the resolver repeats the
-same step against the browser-rendered HTML; blocked static assets are ignored as
-non-menu diagnostics.
+inspect only cache misses. Discovery preserves the Google Maps panel's visual
+order but accepts only reusable major-provider integrations such as DoorDash,
+Uber Eats, Grubhub, Toast, Olo, ChowNow, Square, and Clover. Restaurant-owned
+ordering sites are skipped, so the first matching major-provider link becomes
+primary and up to two later matches remain available as runtime fallbacks.
 A successful menu can replace the Google fallback with a typical per-person
 meal estimate. The estimator classifies raw menu items into complete meals,
 mains, shared mains, small plates, sides, drinks, desserts, unit-priced items,
