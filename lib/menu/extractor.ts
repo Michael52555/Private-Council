@@ -33,6 +33,7 @@ function extractionMethod(
 function mergeExtractions(
   extractions: HtmlMenuExtraction[],
 ): HtmlMenuExtraction {
+  const featuredSection = /^(?:best\s*sellers?|most ordered(?: on grubhub)?|popular items?)$/i;
   const methods = new Set<"json_ld" | "embedded_json" | "dom">();
   const itemsByIdentity = new Map<string, MenuItem>();
   const restaurantTags = new Set<string>();
@@ -42,9 +43,24 @@ function mergeExtractions(
     for (const item of extraction.items) {
       const key = `${item.name}|${item.price ?? ""}`.toLowerCase();
       const existing = itemsByIdentity.get(key);
-      if (!existing || (!existing.description && item.description)) {
+      if (!existing) {
         itemsByIdentity.set(key, item);
+        continue;
       }
+      const existingFeaturedSection = featuredSection.test(existing.section ?? "");
+      const nextFeaturedSection = featuredSection.test(item.section ?? "");
+      itemsByIdentity.set(key, {
+        ...existing,
+        ...(!existing.description && item.description
+          ? { description: item.description }
+          : {}),
+        ...((!existing.section || existingFeaturedSection) && item.section && !nextFeaturedSection
+          ? { section: item.section }
+          : {}),
+        ...(existing.featured || item.featured || existingFeaturedSection || nextFeaturedSection
+          ? { featured: true }
+          : {}),
+      });
     }
   }
   return {

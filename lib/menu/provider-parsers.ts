@@ -243,11 +243,14 @@ function walkProviderPayload(
   seen.add(value);
 
   if (context.eligibleItem) {
-    const item = itemFromNode(
-      value,
-      sourceId,
-      hasBestSellerMarker(value) ? "Best Sellers" : context.section,
-    );
+    const item = itemFromNode(value, sourceId, context.section);
+    if (
+      item &&
+      (hasBestSellerMarker(value) ||
+        GRUBHUB_BEST_SELLER_SECTION.test(context.section ?? ""))
+    ) {
+      item.featured = true;
+    }
     if (item) items.push(item);
   }
 
@@ -270,7 +273,30 @@ function dedupe(items: MenuItem[]): MenuItem[] {
   for (const item of items) {
     const key = `${item.name}|${item.price}`.toLowerCase();
     const existing = byIdentity.get(key);
-    if (!existing || (!existing.description && item.description)) byIdentity.set(key, item);
+    if (!existing) {
+      byIdentity.set(key, item);
+      continue;
+    }
+    const existingIsFeaturedSection = GRUBHUB_BEST_SELLER_SECTION.test(
+      existing.section ?? "",
+    );
+    const nextIsFeaturedSection = GRUBHUB_BEST_SELLER_SECTION.test(
+      item.section ?? "",
+    );
+    byIdentity.set(key, {
+      ...existing,
+      ...(!existing.description && item.description
+        ? { description: item.description }
+        : {}),
+      // When Grubhub repeats one product in Best Sellers and its real category,
+      // keep the useful category while retaining the featured signal.
+      ...((!existing.section || existingIsFeaturedSection) && item.section && !nextIsFeaturedSection
+        ? { section: item.section }
+        : {}),
+      ...(existing.featured || item.featured || existingIsFeaturedSection || nextIsFeaturedSection
+        ? { featured: true }
+        : {}),
+    });
   }
   return [...byIdentity.values()];
 }
@@ -349,8 +375,7 @@ function extractGrubhubSemanticDom(
   const $ = cheerio.load(html);
   const items: MenuItem[] = [];
   const nonItemHeading = /^(?:menu|delivery|pickup|reviews?|hours|faqs?|best sellers|start group order|see the full schedule)$/i;
-  let insideBestSellers = false;
-  let bestSellerHeadingLevel = 6;
+  let currentSection: string | undefined;
 
   const plausibleProductName = (value: string, currentHeading: string): string | undefined => {
     const candidate = value.replace(/\s+/g, " ").trim();
@@ -413,12 +438,8 @@ function extractGrubhubSemanticDom(
       $(element).attr("aria-level") ?? tagMatch?.[1] ?? 6,
     );
     if (GRUBHUB_BEST_SELLER_SECTION.test(headingText)) {
-      insideBestSellers = true;
-      bestSellerHeadingLevel = Number.isFinite(headingLevel) ? headingLevel : 6;
+      currentSection = "Best Sellers";
       return;
-    }
-    if (insideBestSellers && headingLevel <= bestSellerHeadingLevel) {
-      insideBestSellers = false;
     }
     if (!headingText || headingText.length > 180 || nonItemHeading.test(headingText)) return;
 
@@ -445,14 +466,28 @@ function extractGrubhubSemanticDom(
       container = container.parent();
       if (container.length === 0) break;
     }
-    if (!name || isPriceOnlyMenuText(name)) return;
-    if (price === undefined || !Number.isFinite(price)) return;
+    if (!name || isPriceOnlyMenuText(name) || price === undefined || !Number.isFinite(price)) {
+      // A heading without one nearby product price is a category candidate.
+      // Keeping it lets later product cards retain sections such as Entrées,
+      // Sushi Rolls, Bowls, or Combos even when Best Sellers is absent.
+      if (
+        !isPriceOnlyMenuText(headingText) &&
+        Number.isFinite(headingLevel) &&
+        headingLevel <= 4 &&
+        !/\$[0-9]/.test(headingText)
+      ) {
+        currentSection = headingText;
+      }
+      return;
+    }
     const hasBestSellerBadge = container
       .find("*")
       .addBack()
       .toArray()
       .some((node) => /^best seller$/i.test($(node).text().replace(/\s+/g, " ").trim()));
-    if (!insideBestSellers && !hasBestSellerBadge) return;
+    const featured = hasBestSellerBadge || GRUBHUB_BEST_SELLER_SECTION.test(
+      currentSection ?? "",
+    );
     const description = container
       .find("p")
       .first()
@@ -460,10 +495,11 @@ function extractGrubhubSemanticDom(
       .replace(/\s+/g, " ")
       .trim();
     items.push({
-      id: itemId(source.id, name, undefined, price),
+      id: itemId(source.id, name, currentSection, price),
       name,
       ...(description && description !== name ? { description } : {}),
-      section: "Best Sellers",
+      ...(currentSection ? { section: currentSection } : {}),
+      ...(featured ? { featured: true } : {}),
       price: Math.round(price * 100) / 100,
       currency: "USD",
       sourceId: source.id,
@@ -496,10 +532,7 @@ export function extractProviderMenuFromJson(
     );
     if (items.length >= 750) break;
   }
-  const deduped = dedupe(items).slice(0, 750);
-  const scopedItems = adapterId === "grubhub"
-    ? deduped.filter((item) => GRUBHUB_BEST_SELLER_SECTION.test(item.section ?? ""))
-    : deduped;
+  const scopedItems = dedupe(items).slice(0, 750);
   return {
     items: scopedItems,
     restaurantTags: [...restaurantTags],

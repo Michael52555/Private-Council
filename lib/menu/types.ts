@@ -50,6 +50,7 @@ export type MenuItem = {
   name: string;
   description?: string;
   section?: string;
+  featured?: boolean;
   price?: number;
   currency?: string;
   imageUrl?: string;

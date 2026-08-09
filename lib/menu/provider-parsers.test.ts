@@ -110,7 +110,7 @@ test("applies the provider schema to embedded Taco Bell state", () => {
   assert.equal(result.items[0].price, 1.99);
 });
 
-test("extracts only the Grubhub Best Sellers section from semantic headings", () => {
+test("extracts the full Grubhub menu and marks Best Sellers as featured", () => {
   const source = makeOrderingSource({
     url: "https://www.grubhub.com/restaurant/example/123",
     discoveredFrom: "google_maps",
@@ -138,10 +138,20 @@ test("extracts only the Grubhub Best Sellers section from semantic headings", ()
       ["Chicken Katsu", 21.99],
       ["Teriyaki Chicken", 20.99],
       ["Maui Pineapple Chicken", 24.99],
+      ["Entire Menu Item", 99.99],
     ],
   );
   assert(result.methods.has("dom"));
-  assert(result.items.every((item) => item.section === "Best Sellers"));
+  assert.deepEqual(
+    result.items.map((item) => [item.section, item.featured ?? false]),
+    [
+      ["Best Sellers", true],
+      ["Best Sellers", true],
+      ["Best Sellers", true],
+      ["Best Sellers", true],
+      ["Entrées", false],
+    ],
+  );
   assert.deepEqual(result.restaurantTags, ["Bowls", "Dinner", "Healthy"]);
 });
 
@@ -181,8 +191,11 @@ test("uses a Grubhub Best Seller badge when the featured section is absent", () 
   `, source, "grubhub");
 
   assert.deepEqual(
-    result.items.map((item) => [item.name, item.price, item.section]),
-    [["Spicy Deluxe Sandwich", 10.25, "Best Sellers"]],
+    result.items.map((item) => [item.name, item.price, item.section, item.featured ?? false]),
+    [
+      ["Spicy Deluxe Sandwich", 10.25, "Entrées", true],
+      ["Regular Sandwich", 8.45, "Entrées", false],
+    ],
   );
 });
 
@@ -240,7 +253,7 @@ test("drops price-only Grubhub products when no real name can be recovered", () 
   assert.deepEqual(result.items, []);
 });
 
-test("filters Grubhub JSON payloads to Best Sellers", () => {
+test("keeps all Grubhub JSON menu sections while prioritizing Best Sellers", () => {
   const source = makeOrderingSource({
     url: "https://www.grubhub.com/restaurant/example/123",
     discoveredFrom: "google_maps",
@@ -269,10 +282,82 @@ test("filters Grubhub JSON payloads to Best Sellers", () => {
   ], source, "grubhub");
 
   assert.deepEqual(
-    result.items.map((item) => [item.name, item.price, item.section]),
+    result.items.map((item) => [item.name, item.price, item.section, item.featured ?? false]),
     [
-      ["Chicken Sandwich", 8.45, "Best Sellers"],
-      ["Spicy Deluxe Sandwich", 10.25, "Best Sellers"],
+      ["Chicken Sandwich", 8.45, "Best Sellers", true],
+      ["Spicy Deluxe Sandwich", 10.25, "Best Sellers", true],
+      ["Waffle Fries", 4.49, "Sides", false],
     ],
+  );
+});
+
+test("extracts Grubhub entrees when the restaurant has no Best Sellers", () => {
+  const source = makeOrderingSource({
+    url: "https://www.grubhub.com/restaurant/no-featured-section/456",
+    discoveredFrom: "google_maps",
+  });
+  const result = extractProviderMenuFromJson([
+    {
+      url: "https://www.grubhub.com/api/menu",
+      status: 200,
+      contentType: "application/json",
+      data: {
+        categories: [
+          {
+            name: "Entrées",
+            items: [
+              { name: "Chicken Curry", displayPrice: "$16.49" },
+              { name: "Katsu Curry", displayPrice: "$18.29" },
+              { name: "Beef Curry", displayPrice: "$19.49" },
+            ],
+          },
+          {
+            name: "Beverages",
+            items: [{ name: "Iced Tea", displayPrice: "$3.49" }],
+          },
+        ],
+      },
+    },
+  ], source, "grubhub");
+
+  assert.deepEqual(
+    result.items.map((item) => [item.name, item.section]),
+    [
+      ["Chicken Curry", "Entrées"],
+      ["Katsu Curry", "Entrées"],
+      ["Beef Curry", "Entrées"],
+      ["Iced Tea", "Beverages"],
+    ],
+  );
+});
+
+test("deduplicates featured products into their real Grubhub section", () => {
+  const source = makeOrderingSource({
+    url: "https://www.grubhub.com/restaurant/duplicate-menu/789",
+    discoveredFrom: "google_maps",
+  });
+  const result = extractProviderMenuFromJson([
+    {
+      url: "https://www.grubhub.com/api/menu",
+      status: 200,
+      contentType: "application/json",
+      data: {
+        categories: [
+          {
+            name: "Best Sellers",
+            items: [{ name: "Chicken Sandwich", displayPrice: "$8.45" }],
+          },
+          {
+            name: "Sandwiches",
+            items: [{ name: "Chicken Sandwich", displayPrice: "$8.45" }],
+          },
+        ],
+      },
+    },
+  ], source, "grubhub");
+
+  assert.deepEqual(
+    result.items.map((item) => [item.name, item.section, item.featured]),
+    [["Chicken Sandwich", "Sandwiches", true]],
   );
 });
