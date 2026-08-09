@@ -162,6 +162,60 @@ test("uses a Grubhub Best Seller badge when the featured section is absent", () 
   );
 });
 
+test("recovers a Grubhub product name when only its price is a heading", () => {
+  const source = makeOrderingSource({
+    url: "https://www.grubhub.com/restaurant/luna-grill/123",
+    discoveredFrom: "google_maps",
+  });
+  const result = extractProviderMenuFromHtml(`
+    <main>
+      <h2>Best Sellers</h2>
+      <article>
+        <a href="/menu-item/modern-greek-combo">
+          <div><span>Modern Greek Combo</span><p>Chicken, rice, pita, and salad.</p></div>
+          <div><span role="heading" aria-level="4">$17.49+</span></div>
+        </a>
+      </article>
+      <article>
+        <a href="/menu-item/chicken-kabob-plate">
+          <div><span>Chicken Kabob Plate</span><p>Two skewers with rice and salad.</p></div>
+          <div><span role="heading" aria-level="4">$20.69+</span></div>
+        </a>
+      </article>
+      <article>
+        <a href="/menu-item/gyro-plate">
+          <div><span>Gyro Plate</span><p>Gyro, rice, pita, and salad.</p></div>
+          <div><span role="heading" aria-level="4">$21.89+</span></div>
+        </a>
+      </article>
+    </main>
+  `, source, "grubhub");
+
+  assert.deepEqual(
+    result.items.map((item) => [item.name, item.price, item.section]),
+    [
+      ["Modern Greek Combo", 17.49, "Best Sellers"],
+      ["Chicken Kabob Plate", 20.69, "Best Sellers"],
+      ["Gyro Plate", 21.89, "Best Sellers"],
+    ],
+  );
+});
+
+test("drops price-only Grubhub products when no real name can be recovered", () => {
+  const source = makeOrderingSource({
+    url: "https://www.grubhub.com/restaurant/example/123",
+    discoveredFrom: "google_maps",
+  });
+  const result = extractProviderMenuFromHtml(`
+    <main>
+      <h2>Best Sellers</h2>
+      <div><span role="heading" aria-level="4">$17.49+</span></div>
+    </main>
+  `, source, "grubhub");
+
+  assert.deepEqual(result.items, []);
+});
+
 test("filters Grubhub JSON payloads to Best Sellers", () => {
   const source = makeOrderingSource({
     url: "https://www.grubhub.com/restaurant/example/123",
