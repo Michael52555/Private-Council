@@ -12,8 +12,8 @@ import {
 } from "@/lib/menu/meal-estimate";
 
 const orderingSchemaVersion = 5;
-export const menuSchemaVersion = 2;
-const menuAttemptVersion = 5;
+export const menuSchemaVersion = 3;
+const menuAttemptVersion = 6;
 const orderingSuccessLifetimeMs = 14 * 24 * 60 * 60 * 1000;
 const orderingEmptyLifetimeMs = 5 * 60 * 1000;
 const failureRetryMs = 3 * 60 * 60 * 1000;
@@ -101,6 +101,7 @@ function withCurrentPriceEstimate(
     ...result,
     priceSummary: summarizeTypicalMealPrices(result.items, {
       restaurantName: result.restaurantName,
+      mealProfile: result.mealProfile,
     }),
   };
 }

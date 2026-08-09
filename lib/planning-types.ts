@@ -1,4 +1,4 @@
-import type { OrderingSource } from "@/lib/menu/types";
+import type { OrderingSource, RestaurantMealProfile } from "@/lib/menu/types";
 
 export type Importance =
   | 1
@@ -97,6 +97,9 @@ export type RestaurantCandidate = CandidatePlan & {
   budgetEstimateCurrency: string | null;
   menuStatus: MenuEnrichmentStatus;
   menuItemCount: number;
+  restaurantMealProfile: RestaurantMealProfile;
+  primaryType?: string;
+  placeTypes: string[];
   priceLevel?: string;
   rating?: number;
   userRatingCount?: number;

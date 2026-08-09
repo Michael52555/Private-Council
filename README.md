@@ -22,9 +22,10 @@ The current restaurant flow deliberately separates provider discovery from menu
 extraction:
 
 1. `POST /api/generate-candidates` uses Google Geocoding and Places Nearby
-   Search to return real restaurants. A numeric Google `priceRange` becomes a
-   medium-confidence budget fallback. If only `priceLevel` exists, the app uses
-   a broad, explicitly low-confidence US-dollar band.
+   Search to return real restaurants. `primaryType` and `types` classify each
+   candidate as `fast_food` or `sit_down` before menu enrichment begins. A
+   numeric Google `priceRange` is retained only as a final fallback. If only
+   `priceLevel` exists, the fallback is a broad low-confidence US-dollar band.
 2. `POST /api/restaurants/ordering-sources` opens the restaurant's Google Maps
    listing, targets its **Online ordering** control, and returns only provider
    URLs exposed by that interaction. The ordinary restaurant website is
@@ -43,21 +44,19 @@ For a resolved restaurant, extraction is restricted to Grubhub's **Best
 Sellers** section (or item-level Best Seller badges), preventing full-menu
 sauces, merchandise, modifiers, and unrelated low-price items from distorting
 the representative meal estimate.
-A successful menu can replace the Google fallback with a typical per-person
-meal estimate. The estimator classifies raw menu items into complete meals,
-mains, shared mains, small plates, sides, drinks, desserts, unit-priced items,
-and accessories. It then applies one bounded composition template: a direct
-combo price, one main with an optional side and drink, two to three small
-plates, or several shared dishes divided across the party. It never enumerates
-arbitrary item combinations, so work remains linear in menu size. Family and
-catering packages are excluded from single-person templates. Unit-priced sushi
-pieces are not mistaken for a full meal unless the menu also exposes enough
-complete meals.
+A successful menu produces a typical per-person meal estimate through one of
+two bounded models. Fast-food restaurants use explicit combo/meal/box items
+first; otherwise the estimator composes a recognized main, side, and drink
+when those roles are available. Individual tacos, wings, nuggets, and similar
+unit items cannot become a complete meal by themselves. Sit-down restaurants
+use one recognized main entry plus one side and one drink when present. Unknown
+items, drinks, desserts, accessories, and unit-priced sushi do not enter a main
+price distribution. The estimator never enumerates arbitrary combinations, so
+work remains linear in the Best Sellers sample.
 
-Composition confidence affects ranking weight: direct meals and clear mains
-carry more weight than inferred shared-plate baskets. A menu estimate that is
-implausibly far outside Google's numeric range is rejected in favor of the
-Google fallback.
+Composition confidence affects ranking weight. A reliable Grubhub result is
+always authoritative even when it conflicts with Google's price range; Google
+pricing is promoted only after Grubhub discovery or estimation fails.
 
 Blocked or unrecognized menus leave the Google fallback intact. Budget
 compatibility is continuous: it combines the representative meal price with

@@ -72,6 +72,8 @@ function candidate(
     budgetEstimateCurrency: null,
     menuStatus: "pending",
     menuItemCount: 0,
+    restaurantMealProfile: "sit_down",
+    placeTypes: [],
     orderingSources: [],
     ...overrides,
   };

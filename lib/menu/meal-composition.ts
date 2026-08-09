@@ -1,5 +1,10 @@
-import type { MealPattern, MenuItem } from "@/lib/menu/types";
+import type {
+  MealPattern,
+  MenuItem,
+  RestaurantMealProfile,
+} from "@/lib/menu/types";
 import type { BudgetEstimateConfidence } from "@/lib/planning-types";
+import { classifyRestaurantMealProfile } from "@/lib/menu/restaurant-profile";
 
 export type MenuItemRole =
   | "complete_meal"
@@ -26,6 +31,7 @@ export type MealCompositionEstimate = {
 
 type MealCompositionContext = {
   restaurantName?: string;
+  mealProfile?: RestaurantMealProfile;
   partySize?: number;
 };
 
@@ -36,18 +42,17 @@ type PriceDistribution = {
 };
 
 const ACCESSORY_PATTERN = /\b(?:add[ -]?ons?|extras?|modifier|choice|option|sauces?|dips?|dressings?|condiments?|toppings?|utensils?|napkins?|cutlery|special instructions?)\b/i;
-const DRINK_PATTERN = /\b(?:beverages?|drinks?|sodas?|coffee|tea|juice|lemonade|smoothie|shake|beer|wine|cocktail|sake)\b/i;
+const DRINK_PATTERN = /\b(?:beverages?|drinks?|sodas?|soft drinks?|fountain drinks?|coffee|tea|juice|lemonade|smoothie|shake|beer|wine|cocktail|sake|coke|coca[ -]?cola|pepsi|sprite|fanta|root beer|bottled water|sparkling water|milk|horchata|agua fresca)\b/i;
 const DESSERT_PATTERN = /\b(?:desserts?|sweets?|cookies?|cake|ice cream|gelato|pudding|brownie|cheesecake)\b/i;
 const COMPLETE_MEAL_PATTERN = /\b(?:combo|combination|meals?|bento|omakase|prix fixe|plate|platter|box|bundle|lunch special|dinner special|dinner for one|lunch for one)\b/i;
 const GROUP_MEAL_PATTERN = /\b(?:family (?:meal|pack|bundle)|party (?:pack|tray)|feeds? \d+|serves? \d+|for \d+)\b/i;
 const SIDE_PATTERN = /\b(?:sides?|fries|chips|mashed potatoes|coleslaw|slaw|side salad|side rice|rice side|beans|cornbread)\b/i;
 const SMALL_PLATE_PATTERN = /\b(?:appetizers?|starters?|small plates?|tapas|dim\s*sum|snacks?|mezze)\b/i;
 const UNIT_ITEM_PATTERN = /\b(?:nigiri|sashimi|hand roll|maki|sushi pieces?|by the piece|per piece)\b/i;
-const MAIN_PATTERN = /\b(?:mains?|entrées?|entrees?|burgers?|sandwiches?|wraps?|burritos?|pizza|ramen|udon|noodles?|pasta|curry|rice bowls?|donburi|steak|ribs?|brisket|chicken|beef|pork|lamb|seafood|fish)\b/i;
+const MAIN_PATTERN = /\b(?:mains?|entrées?|entrees?|burgers?|sandwich(?:es)?|wraps?|burritos?|quesadillas?|pizza|ramen|udon|noodles?|pasta|curry|(?:rice )?bowls?|donburi|steak|ribs?|brisket|chicken|beef|pork|lamb|seafood|fish|tacos?|wings?|nuggets?|tenders?|salads?)\b/i;
 const SHARED_ITEM_PATTERN = /\b(?:family style|to share|shared|large plates?|hot pot|whole fish|whole chicken)\b/i;
 const UNIT_PRICED_RESTAURANT_PATTERN = /\b(?:sushi|izakaya)\b/i;
-const SMALL_PLATE_RESTAURANT_PATTERN = /\b(?:tapas|dim\s*sum|small plates?|izakaya)\b/i;
-const SHARED_RESTAURANT_PATTERN = /\b(?:hot pot|korean bbq|family style|szechuan|sichuan|hunan|cantonese)\b/i;
+const FAST_FOOD_UNIT_PATTERN = /\b(?:single|individual|a la carte|à la carte|tacos?|wings?|nuggets?|tenders?|pieces?)\b/i;
 
 function itemText(item: MenuItem): string {
   return `${item.section ?? ""} ${item.name} ${item.description ?? ""}`
@@ -151,18 +156,18 @@ export function estimateMealComposition(
   const completeMeals = roleItems("complete_meal");
   const regularMains = roleItems("main");
   const sharedMains = roleItems("shared_main");
-  const mealCandidates = [...completeMeals, ...regularMains];
   const sides = roleItems("side");
   const drinks = roleItems("drink");
-  const smallPlates = roleItems("small_plate");
   const unitItems = roleItems("unit_item");
-  const unknown = roleItems("unknown");
   const restaurantName = context.restaurantName ?? "";
+  const mealProfile = context.mealProfile ?? classifyRestaurantMealProfile({
+    name: restaurantName,
+  });
 
-  if (completeMeals.length >= 3) {
+  if (completeMeals.length >= 2) {
     return estimate(
       "combo_dominant",
-      "high",
+      completeMeals.length >= 3 ? "high" : "medium",
       distribution(completeMeals),
       completeMeals,
       priced.length,
@@ -170,98 +175,68 @@ export function estimateMealComposition(
     );
   }
 
-  const unitSignal = UNIT_PRICED_RESTAURANT_PATTERN.test(restaurantName) ||
-    (unitItems.length >= 3 && unitItems.length / priced.length >= 0.2);
-  if (unitSignal) return null;
-
-  const smallPlateSignal = SMALL_PLATE_RESTAURANT_PATTERN.test(restaurantName) ||
-    (smallPlates.length >= 3 && smallPlates.length >= mealCandidates.length);
-  if (smallPlateSignal && smallPlates.length >= 3) {
-    const small = distribution(smallPlates);
-    return estimate(
-      "multiple_small_plates",
-      "low",
-      {
-        lower: 2 * small.lower,
-        median: 2.5 * small.median,
-        upper: 3 * small.upper,
-      },
-      smallPlates,
-      priced.length,
-      true,
+  if (mealProfile === "fast_food") {
+    const fastFoodMains = regularMains.filter(
+      (item) => !FAST_FOOD_UNIT_PATTERN.test(itemText(item)),
     );
-  }
-
-  const sharedSignal = SHARED_RESTAURANT_PATTERN.test(restaurantName) ||
-    sharedMains.length >= 3;
-  const shareableDishes = [...regularMains, ...sharedMains];
-  if (sharedSignal && shareableDishes.length >= 3) {
-    const main = distribution(shareableDishes);
-    const partySize = Math.min(8, Math.max(2, context.partySize ?? 2));
-    const typicalDishesPerPerson = (partySize + 0.5) / partySize;
-    const fullDishesPerPerson = (partySize + 1) / partySize;
-    return estimate(
-      "shared_dishes",
-      "low",
-      {
-        lower: main.lower,
-        median: typicalDishesPerPerson * main.median,
-        upper: fullDishesPerPerson * main.upper,
-      },
-      shareableDishes,
-      priced.length,
-      true,
-    );
-  }
-
-  if (mealCandidates.length >= 3 && sides.length >= 2) {
-    const main = distribution(mealCandidates);
-    const side = distribution(sides);
-    const drink = drinks.length >= 2 ? distribution(drinks) : null;
-    return estimate(
-      "main_plus_sides",
-      "medium",
-      {
-        lower: main.lower,
-        median: main.median + side.median + (drink ? 0.35 * drink.median : 0),
-        upper: main.upper + side.upper + (drink ? 0.75 * drink.upper : 0),
-      },
-      [...mealCandidates, ...sides, ...drinks],
-      priced.length,
-      true,
-    );
-  }
-
-  if (mealCandidates.length >= 3) {
-    const main = distribution(mealCandidates);
-    const drink = drinks.length >= 2 ? distribution(drinks) : null;
-    return estimate(
-      "single_main",
-      "high",
-      {
-        lower: main.lower,
-        median: main.median + (drink ? 0.25 * drink.median : 0),
-        upper: main.upper + (drink ? 0.75 * drink.upper : 0),
-      },
-      [...mealCandidates, ...drinks],
-      priced.length,
-      Boolean(drink),
-    );
-  }
-
-  const ordinaryItems = [...mealCandidates, ...unknown].filter(
-    (item) => !UNIT_ITEM_PATTERN.test(itemText(item)),
-  );
-  if (ordinaryItems.length >= 3) {
+    if (fastFoodMains.length < 2) return null;
+    const main = distribution(fastFoodMains);
+    const side = sides.length > 0 ? distribution(sides) : null;
+    const drink = drinks.length > 0 ? distribution(drinks) : null;
+    if (side || drink) {
+      return estimate(
+        "main_plus_sides",
+        "medium",
+        {
+          lower: main.lower + (side?.lower ?? 0) + (drink?.lower ?? 0),
+          median: main.median + (side?.median ?? 0) + (drink?.median ?? 0),
+          upper: main.upper + (side?.upper ?? 0) + (drink?.upper ?? 0),
+        },
+        [...fastFoodMains, ...sides, ...drinks],
+        priced.length,
+        true,
+      );
+    }
     return estimate(
       "single_main",
       "medium",
-      distribution(ordinaryItems),
-      ordinaryItems,
+      main,
+      fastFoodMains,
       priced.length,
       false,
     );
   }
 
-  return null;
+  const unitSignal = UNIT_PRICED_RESTAURANT_PATTERN.test(restaurantName) ||
+    (unitItems.length >= 3 && unitItems.length / priced.length >= 0.2);
+  if (unitSignal && completeMeals.length === 0) return null;
+
+  const sitDownMains = [...regularMains, ...sharedMains];
+  if (sitDownMains.length < 3) return null;
+  const main = distribution(sitDownMains);
+  const side = sides.length > 0 ? distribution(sides) : null;
+  const drink = drinks.length > 0 ? distribution(drinks) : null;
+  if (side || drink) {
+    return estimate(
+      "main_plus_sides",
+      "medium",
+      {
+        lower: main.lower + (side?.lower ?? 0) + (drink?.lower ?? 0),
+        median: main.median + (side?.median ?? 0) + (drink?.median ?? 0),
+        upper: main.upper + (side?.upper ?? 0) + (drink?.upper ?? 0),
+      },
+      [...sitDownMains, ...sides, ...drinks],
+      priced.length,
+      true,
+    );
+  }
+  return estimate(
+    "single_main",
+    "high",
+    main,
+    sitDownMains,
+    priced.length,
+    false,
+  );
+
 }

@@ -11,16 +11,19 @@ function item(id: string, name: string, price: number, section?: string): MenuIt
   return { id, name, price, section, currency: "USD", sourceId: "source" };
 }
 
-test("prefers explicit meals and combos over sauces, drinks, and sides", () => {
-  const summary = summarizeTypicalMealPrices([
-    item("sauce", "Fire Sauce", 0.25, "Sauces"),
-    item("drink", "Medium Soda", 2.49, "Drinks"),
-    item("side", "Nacho Fries", 3.49, "Sides"),
-    item("combo-1", "Taco Combo Meal", 8.99, "Combos"),
-    item("combo-2", "Burrito Box", 10.99, "Combos"),
-    item("combo-3", "Chicken Bowl", 12.99, "Meals"),
-    item("family", "Family Meal for 4", 39.99, "Meals"),
-  ]);
+test("prefers explicit fast-food combos over sauces, drinks, and sides", () => {
+  const summary = summarizeTypicalMealPrices(
+    [
+      item("sauce", "Fire Sauce", 0.25, "Sauces"),
+      item("drink", "Medium Soda", 2.49, "Drinks"),
+      item("side", "Nacho Fries", 3.49, "Sides"),
+      item("combo-1", "Taco Combo Meal", 8.99, "Combos"),
+      item("combo-2", "Burrito Box", 10.99, "Combos"),
+      item("combo-3", "Chicken Bowl Meal", 12.99, "Meals"),
+      item("family", "Family Meal for 4", 39.99, "Meals"),
+    ],
+    { mealProfile: "fast_food" },
+  );
 
   assert.equal(summary.basis, "explicit_meals");
   assert.equal(summary.sampleItemCount, 3);
@@ -39,14 +42,16 @@ test("recognizes entree-like names as single-person mains", () => {
     item("d", "Side of Rice", 3, "Sides"),
   ]);
 
-  assert.equal(summary.basis, "filtered_menu_items");
-  assert.equal(summary.sampleItemCount, 3);
-  assert.equal(summary.median, 11);
-  assert.equal(summary.mealPattern, "single_main");
-  assert.equal(mealEstimateConfidence(summary), "high");
+  assert.equal(summary.basis, "composed_basket");
+  assert.equal(summary.sampleItemCount, 4);
+  assert.equal(summary.lowerQuartile, 12);
+  assert.equal(summary.median, 14);
+  assert.equal(summary.upperQuartile, 16);
+  assert.equal(summary.mealPattern, "main_plus_sides");
+  assert.equal(mealEstimateConfidence(summary), "medium");
 });
 
-test("composes a main, side, and optional drink for a barbecue meal", () => {
+test("composes one sit-down main, one side, and one drink", () => {
   const summary = summarizeTypicalMealPrices(
     [
       item("brisket", "Smoked Brisket", 18, "Mains"),
@@ -59,18 +64,18 @@ test("composes a main, side, and optional drink for a barbecue meal", () => {
       item("tea", "Iced Tea", 3, "Drinks"),
       item("lemonade", "Lemonade", 5, "Drinks"),
     ],
-    { restaurantName: "Smoke Shop BBQ" },
+    { restaurantName: "Smoke Shop BBQ", mealProfile: "sit_down" },
   );
 
   assert.equal(summary.basis, "composed_basket");
   assert.equal(summary.mealPattern, "main_plus_sides");
-  assert.equal(summary.lowerQuartile, 14);
-  assert.equal(summary.median, 27.4);
-  assert.equal(summary.upperQuartile, 33.75);
+  assert.equal(summary.lowerQuartile, 21);
+  assert.equal(summary.median, 30);
+  assert.equal(summary.upperQuartile, 35);
   assert.equal(mealEstimateConfidence(summary), "medium");
 });
 
-test("estimates two to three plates per person at a tapas restaurant", () => {
+test("does not invent a price for unsupported sit-down small plates", () => {
   const summary = summarizeTypicalMealPrices(
     [
       item("olives", "Marinated Olives", 7, "Tapas"),
@@ -78,18 +83,15 @@ test("estimates two to three plates per person at a tapas restaurant", () => {
       item("shrimp", "Garlic Shrimp", 11, "Tapas"),
       item("octopus", "Grilled Octopus", 13, "Tapas"),
     ],
-    { restaurantName: "Barcelona Tapas" },
+    { restaurantName: "Barcelona Tapas", mealProfile: "sit_down" },
   );
 
-  assert.equal(summary.basis, "composed_basket");
-  assert.equal(summary.mealPattern, "multiple_small_plates");
-  assert.equal(summary.lowerQuartile, 14);
-  assert.equal(summary.median, 25);
-  assert.equal(summary.upperQuartile, 33);
-  assert.equal(mealEstimateConfidence(summary), "low");
+  assert.equal(summary.basis, "none");
+  assert.equal(summary.median, null);
+  assert.equal(hasReliableMealEstimate(summary), false);
 });
 
-test("splits several shared dishes across a default party of two", () => {
+test("uses main-entry prices for a sit-down restaurant without sides or drinks", () => {
   const summary = summarizeTypicalMealPrices(
     [
       item("fish", "Whole Fish", 30, "Mains"),
@@ -97,14 +99,69 @@ test("splits several shared dishes across a default party of two", () => {
       item("beef", "Cumin Beef", 26, "Mains"),
       item("ribs", "Garlic Ribs", 18, "Mains"),
     ],
-    { restaurantName: "Szechuan Impression" },
+    { restaurantName: "Szechuan Impression", mealProfile: "sit_down" },
   );
 
-  assert.equal(summary.mealPattern, "shared_dishes");
+  assert.equal(summary.mealPattern, "single_main");
   assert.equal(summary.lowerQuartile, 18);
-  assert.equal(summary.median, 30);
-  assert.equal(summary.upperQuartile, 39);
-  assert.equal(mealEstimateConfidence(summary), "low");
+  assert.equal(summary.median, 24);
+  assert.equal(summary.upperQuartile, 26);
+  assert.equal(mealEstimateConfidence(summary), "high");
+});
+
+test("builds a fast-food meal from mains, a side, and a drink", () => {
+  const summary = summarizeTypicalMealPrices(
+    [
+      item("spicy", "Spicy Deluxe Sandwich", 10.25),
+      item("classic", "Chicken Sandwich", 8.45),
+      item("nuggets", "Chicken Nuggets", 8.55),
+      item("fries", "Waffle Potato Fries", 4.49, "Sides"),
+      item("coke", "Coca-Cola", 3, "Drinks"),
+    ],
+    { restaurantName: "Chick-fil-A", mealProfile: "fast_food" },
+  );
+
+  assert.equal(summary.mealPattern, "main_plus_sides");
+  assert.equal(summary.lowerQuartile, 15.94);
+  assert.equal(summary.median, 16.84);
+  assert.equal(summary.upperQuartile, 17.74);
+  assert.equal(summary.sampleItemCount, 4);
+  assert.equal(mealEstimateConfidence(summary), "medium");
+});
+
+test("does not mistake individual Taco Bell tacos for a complete meal", () => {
+  const summary = summarizeTypicalMealPrices(
+    [
+      item("taco-1", "Cheesy Toasted Taco", 1.99),
+      item("taco-2", "Crunchy Taco", 2.49),
+      item("taco-3", "Soft Taco", 2.69),
+      item("drink", "Pepsi", 2.99),
+    ],
+    { restaurantName: "Taco Bell", mealProfile: "fast_food" },
+  );
+
+  assert.equal(summary.basis, "none");
+  assert.equal(summary.median, null);
+  assert.equal(hasReliableMealEstimate(summary), false);
+});
+
+test("accepts full fast-food bowls and burritos without adding unrelated items", () => {
+  const summary = summarizeTypicalMealPrices(
+    [
+      item("bowl-1", "Chicken Burrito Bowl", 11.5),
+      item("bowl-2", "Steak Burrito Bowl", 13.25),
+      item("burrito", "Carnitas Burrito", 12.75),
+      item("salad", "Chicken Salad", 12.25),
+      item("chips", "Chips", 2.5, "Sides"),
+    ],
+    { restaurantName: "Chipotle Mexican Grill", mealProfile: "fast_food" },
+  );
+
+  assert.equal(summary.mealPattern, "main_plus_sides");
+  assert.equal(summary.lowerQuartile, 14);
+  assert.equal(summary.median, 15);
+  assert.equal(summary.upperQuartile, 15.25);
+  assert.equal(summary.sampleItemCount, 5);
 });
 
 test("rejects unit-priced sushi pieces as a per-person meal estimate", () => {

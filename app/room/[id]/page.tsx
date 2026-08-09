@@ -1133,6 +1133,7 @@ export default function RoomPage() {
             placeId: candidate.id,
             restaurantName: candidate.name,
             restaurantAddress: candidate.address,
+            mealProfile: candidate.restaurantMealProfile,
             sources: sources.slice(0, 3),
             retryFailed,
           }),

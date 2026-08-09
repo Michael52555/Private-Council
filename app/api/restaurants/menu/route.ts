@@ -7,7 +7,7 @@ import {
 } from "@/lib/menu/database-cache";
 import { runSingleFlight } from "@/lib/menu/singleflight";
 import { hasReliableMealEstimate } from "@/lib/menu/meal-estimate";
-import type { OrderingSource } from "@/lib/menu/types";
+import type { OrderingSource, RestaurantMealProfile } from "@/lib/menu/types";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -32,6 +32,7 @@ export async function POST(request: Request) {
       placeId?: unknown;
       restaurantName?: unknown;
       restaurantAddress?: unknown;
+      mealProfile?: unknown;
       sources?: unknown;
       retryFailed?: unknown;
     };
@@ -45,6 +46,9 @@ export async function POST(request: Request) {
 
     const sources = body.sources.filter(isOrderingSource).slice(0, 3);
     const retryFailed = body.retryFailed === true;
+    const mealProfile: RestaurantMealProfile = body.mealProfile === "fast_food"
+      ? "fast_food"
+      : "sit_down";
     if (sources.length === 0) {
       return NextResponse.json({ error: "No valid HTTPS ordering sources were supplied." }, { status: 400 });
     }
@@ -99,6 +103,7 @@ export async function POST(request: Request) {
           restaurantAddress: typeof body.restaurantAddress === "string"
             ? body.restaurantAddress.trim().slice(0, 500)
             : undefined,
+          mealProfile,
           sources,
         });
       } catch (error) {
@@ -129,6 +134,7 @@ export async function POST(request: Request) {
       console.info("Menu extraction completed", {
         placeId,
         restaurantName: freshResult.restaurantName,
+        mealProfile: freshResult.mealProfile,
         sourceProviders: sources.map((source) => source.provider),
         menuItemCount: freshResult.items.length,
         pricedSampleCount: freshResult.priceSummary.sampleItemCount,

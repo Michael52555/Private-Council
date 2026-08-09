@@ -8,6 +8,7 @@ import {
   hasReliableMealEstimate,
   mealEstimateConfidence,
 } from "@/lib/menu/meal-estimate";
+import { classifyRestaurantMealProfile } from "@/lib/menu/restaurant-profile";
 import type { RestaurantCandidate } from "@/lib/planning-types";
 
 type GeocodedOrigin = {
@@ -34,6 +35,8 @@ type GoogleNearbyPlace = {
   googleMapsUri?: string;
   priceLevel?: string;
   priceRange?: GooglePriceRange;
+  primaryType?: string;
+  types?: string[];
   rating?: number;
   userRatingCount?: number;
 };
@@ -118,7 +121,7 @@ async function searchNearbyRestaurants(
       "X-Goog-FieldMask":
         "places.id,places.displayName,places.formattedAddress,places.location," +
         "places.websiteUri,places.googleMapsUri,places.priceLevel,places.rating," +
-        "places.priceRange,places.userRatingCount",
+        "places.priceRange,places.userRatingCount,places.primaryType,places.types",
     },
     body: JSON.stringify({
       includedTypes: ["restaurant"],
@@ -162,6 +165,14 @@ async function searchNearbyRestaurants(
       priceRange: place.priceRange,
       priceLevel: place.priceLevel,
     });
+    const placeTypes = Array.isArray(place.types)
+      ? place.types.filter((type): type is string => typeof type === "string")
+      : [];
+    const restaurantMealProfile = classifyRestaurantMealProfile({
+      name,
+      primaryType: place.primaryType,
+      placeTypes,
+    });
     candidates.push({
       id,
       name,
@@ -188,6 +199,9 @@ async function searchNearbyRestaurants(
       budgetEstimateCurrency: null,
       menuStatus: "pending",
       menuItemCount: 0,
+      restaurantMealProfile,
+      primaryType: place.primaryType,
+      placeTypes,
       priceLevel: place.priceLevel,
       rating: place.rating,
       userRatingCount: place.userRatingCount,

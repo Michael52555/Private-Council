@@ -18,6 +18,7 @@ import type {
   ExtractedMenu,
   MenuItem,
   OrderingSource,
+  RestaurantMealProfile,
   RestaurantMenuResult,
 } from "@/lib/menu/types";
 
@@ -172,10 +173,18 @@ export async function extractMenuFromSource(
 
 export async function extractMenusWithFallback(
   sources: OrderingSource[],
-  context: { restaurantAddress?: string; restaurantName?: string } = {},
+  context: {
+    restaurantAddress?: string;
+    restaurantName?: string;
+    mealProfile?: RestaurantMealProfile;
+  } = {},
   extractSource: (
     source: OrderingSource,
-    context: { restaurantAddress?: string; restaurantName?: string },
+    context: {
+      restaurantAddress?: string;
+      restaurantName?: string;
+      mealProfile?: RestaurantMealProfile;
+    },
   ) => Promise<ExtractedMenu> = extractMenuFromSource,
 ): Promise<ExtractedMenu[]> {
   const menus: ExtractedMenu[] = [];
@@ -183,6 +192,7 @@ export async function extractMenusWithFallback(
     const menu = await extractSource(source, context);
     const mealSummary = summarizeTypicalMealPrices(menu.items, {
       restaurantName: context.restaurantName,
+      mealProfile: context.mealProfile,
     });
     const hasReliablePriceSample = hasReliableMealEstimate(mealSummary);
     if (sourceIndex > 0 && hasReliablePriceSample) {
@@ -200,21 +210,25 @@ export async function extractRestaurantMenus(input: {
   placeId: string;
   restaurantName?: string;
   restaurantAddress?: string;
+  mealProfile?: RestaurantMealProfile;
   sources: OrderingSource[];
 }): Promise<RestaurantMenuResult> {
   const menus = await extractMenusWithFallback(input.sources, {
     restaurantAddress: input.restaurantAddress,
     restaurantName: input.restaurantName,
+    mealProfile: input.mealProfile,
   });
 
   const items = menus.flatMap((menu) => menu.items);
   return {
     placeId: input.placeId,
     restaurantName: input.restaurantName,
+    mealProfile: input.mealProfile,
     menus,
     items,
     priceSummary: summarizeTypicalMealPrices(items, {
       restaurantName: input.restaurantName,
+      mealProfile: input.mealProfile,
     }),
   };
 }

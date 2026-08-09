@@ -9,7 +9,7 @@ function menuFor(source: OrderingSource, prices: number[]): ExtractedMenu {
     source,
     items: prices.map((price, index): MenuItem => ({
       id: `${source.id}-${index}`,
-      name: `Item ${index + 1}`,
+      name: `Chicken Bowl ${index + 1}`,
       price,
       currency: "USD",
       sourceId: source.id,

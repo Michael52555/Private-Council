@@ -90,9 +90,12 @@ export type MealPattern =
   | "shared_dishes"
   | "unit_items";
 
+export type RestaurantMealProfile = "fast_food" | "sit_down";
+
 export type RestaurantMenuResult = {
   placeId: string;
   restaurantName?: string;
+  mealProfile?: RestaurantMealProfile;
   menus: ExtractedMenu[];
   items: MenuItem[];
   priceSummary: {
