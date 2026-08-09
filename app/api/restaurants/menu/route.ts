@@ -9,6 +9,7 @@ import {
 import { runSingleFlight } from "@/lib/menu/singleflight";
 import { runProviderQueued } from "@/lib/menu/provider-queue";
 import { hasReliableMealEstimate } from "@/lib/menu/meal-estimate";
+import { classifyMenuItem } from "@/lib/menu/meal-composition";
 import type { OrderingSource, RestaurantMealProfile } from "@/lib/menu/types";
 
 export const runtime = "nodejs";
@@ -46,7 +47,10 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "At least one ordering source is required." }, { status: 400 });
     }
 
-    const sources = body.sources.filter(isOrderingSource).slice(0, 3);
+    // The unified pipeline intentionally scrapes only the first Grubhub result.
+    // Enforce that at the API boundary as well so an older browser/database cache
+    // cannot make one restaurant trigger duplicate provider sessions.
+    const sources = body.sources.filter(isOrderingSource).slice(0, 1);
     const retryFailed = body.retryFailed === true;
     const mealProfile: RestaurantMealProfile = body.mealProfile === "fast_food"
       ? "fast_food"
@@ -151,6 +155,15 @@ export async function POST(request: Request) {
         mealProfile: freshResult.mealProfile,
         sourceProviders: sources.map((source) => source.provider),
         menuItemCount: freshResult.items.length,
+        rawPricedItemCount: freshResult.items.filter(
+          (item) => typeof item.price === "number" && Number.isFinite(item.price),
+        ).length,
+        rawPricedSample: freshResult.items.slice(0, 8).map((item) => ({
+          name: item.name,
+          price: item.price,
+          section: item.section,
+          role: classifyMenuItem(item),
+        })),
         pricedSampleCount: freshResult.priceSummary.sampleItemCount,
         estimateConfidence: freshResult.priceSummary.confidence,
         estimatePattern: freshResult.priceSummary.mealPattern,

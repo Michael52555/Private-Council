@@ -129,6 +129,40 @@ test("builds a fast-food meal from mains, a side, and a drink", () => {
   assert.equal(mealEstimateConfidence(summary), "medium");
 });
 
+test("uses branded Grubhub Best Sellers as fast-food mains", () => {
+  const summary = summarizeTypicalMealPrices(
+    [
+      item("sub-1", "The Philly", 12.49, "Best Sellers"),
+      item("sub-2", "The Outlaw", 11.99, "Best Sellers"),
+      item("sub-3", "The Monster", 13.49, "Best Sellers"),
+      item("sub-4", "Titan Turkey", 10.99, "Best Sellers"),
+    ],
+    { restaurantName: "Subway", mealProfile: "fast_food" },
+  );
+
+  assert.equal(summary.basis, "filtered_menu_items");
+  assert.equal(summary.mealPattern, "single_main");
+  assert.equal(summary.sampleItemCount, 4);
+  assert.equal(summary.lowerQuartile, 10.99);
+  assert.equal(summary.median, 12.24);
+  assert.equal(summary.upperQuartile, 12.49);
+  assert.equal(mealEstimateConfidence(summary), "medium");
+});
+
+test("does not estimate a meal from fewer than three unknown featured products", () => {
+  const summary = summarizeTypicalMealPrices(
+    [
+      item("unknown-1", "House Favorite", 4.99, "Best Sellers"),
+      item("unknown-2", "Signature Original", 6.99, "Best Sellers"),
+      item("drink", "Coca-Cola", 2.99, "Best Sellers"),
+    ],
+    { restaurantName: "Example Fast Food", mealProfile: "fast_food" },
+  );
+
+  assert.equal(summary.basis, "none");
+  assert.equal(summary.median, null);
+});
+
 test("does not mistake individual Taco Bell tacos for a complete meal", () => {
   const summary = summarizeTypicalMealPrices(
     [
