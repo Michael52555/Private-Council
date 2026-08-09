@@ -131,6 +131,11 @@ export async function extractMenuFromSource(
           `${rendered.diagnostics.blockedResponseCount} provider response${rendered.diagnostics.blockedResponseCount === 1 ? " was" : "s were"} blocked (HTTP 401/403/429)${rendered.diagnostics.blockedResponseEndpoints.length > 0 ? `: ${rendered.diagnostics.blockedResponseEndpoints.slice(0, 3).join(", ")}` : ""}.`,
         );
       }
+      if (rendered.diagnostics.rateLimitedResponseCount > 0) {
+        warnings.push(
+          `The provider returned HTTP 429 for ${rendered.diagnostics.rateLimitedResponseCount} menu request${rendered.diagnostics.rateLimitedResponseCount === 1 ? "" : "s"}.`,
+        );
+      }
       if (
         rendered.diagnostics.locationSelectionAttempted &&
         !rendered.diagnostics.locationSelectionSucceeded

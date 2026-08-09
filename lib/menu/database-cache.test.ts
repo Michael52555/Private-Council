@@ -6,6 +6,8 @@ import test from "node:test";
 import type { OrderingSource, RestaurantMenuResult } from "@/lib/menu/types";
 import {
   menuSourceFingerprint,
+  menuFailureRetryDelayMs,
+  isTransientProviderFailureReason,
   readMenuCache,
   readSuccessfulMenuCacheBatch,
   storeMenuFailure,
@@ -69,6 +71,13 @@ test("allows an explicit retry to bypass an unchanged negative menu cache", () =
     }).status,
     "miss",
   );
+});
+
+test("uses a short cooldown for provider rate limits", () => {
+  assert.equal(isTransientProviderFailureReason("Grubhub returned HTTP 429."), true);
+  assert.equal(isTransientProviderFailureReason("No reliable prices were found."), false);
+  assert.equal(menuFailureRetryDelayMs("HTTP 429"), 5 * 60 * 1000);
+  assert.equal(menuFailureRetryDelayMs("No reliable prices were found."), 3 * 60 * 60 * 1000);
 });
 
 test("bypasses restaurant cache reads and writes when debugging is enabled", () => {

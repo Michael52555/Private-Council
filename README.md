@@ -36,7 +36,7 @@ extraction:
 
 Candidate generation can return up to twenty restaurants. Cached menu results
 are joined into that initial response in one database query, so known places are
-scored immediately and never enter the scraper queue. Three bounded workers
+scored immediately and never enter the scraper queue. Two bounded discovery workers
 inspect only cache misses. The current focused pipeline opens the Google Maps
 ordering panel, explicitly activates Delivery/外送, and accepts only a Grubhub
 source. Restaurants without Grubhub remain unresolved for later fallback work.
@@ -58,7 +58,10 @@ Composition confidence affects ranking weight. A reliable Grubhub result is
 always authoritative even when it conflicts with Google's price range; Google
 pricing is promoted only after Grubhub discovery or estimation fails.
 
-Blocked or unrecognized menus leave the Google fallback intact. Budget
+Unrecognized menus leave the Google fallback intact. Temporary provider rate
+limits and timeouts do not display a generic Google band as though it were a
+completed menu estimate; they leave the price unresolved until a later retry.
+Budget
 compatibility is continuous: it combines the representative meal price with
 the overlap between the restaurant and requested ranges. Google numeric ranges
 receive less scoring weight than menu data, and coarse Google price levels
@@ -83,9 +86,11 @@ each participant's browser. The API routes use a shared SQLite database at
   agents do not repeatedly hit the same blocked provider. Negative entries are
   versioned and fingerprinted by their provider inputs, so a changed adapter or
   provider list invalidates only the affected failures without deleting useful
-  menu data.
-- Clicking **Regenerate options** bypasses negative ordering and menu caches for
-  unresolved restaurants while continuing to reuse successful menu results.
+  menu data. HTTP 429 failures use a shorter five-minute cooldown.
+- Grubhub extraction is serialized by a central provider queue with spacing
+  between browser sessions. Clicking **Regenerate options** continues to reuse
+  both successful and negative caches instead of producing a full-provider
+  request burst.
 - Incrementing `menuSchemaVersion` starts a clean generation when the extraction
   or meal-estimation algorithm changes.
 

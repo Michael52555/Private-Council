@@ -2,10 +2,12 @@ import { NextResponse } from "next/server";
 import { extractRestaurantMenus } from "@/lib/menu/extractor";
 import {
   readMenuCache,
+  isTransientProviderFailureReason,
   storeMenuFailure,
   storeMenuSuccessOnce,
 } from "@/lib/menu/database-cache";
 import { runSingleFlight } from "@/lib/menu/singleflight";
+import { runProviderQueued } from "@/lib/menu/provider-queue";
 import { hasReliableMealEstimate } from "@/lib/menu/meal-estimate";
 import type { OrderingSource, RestaurantMealProfile } from "@/lib/menu/types";
 
@@ -71,9 +73,12 @@ export async function POST(request: Request) {
     }
     if (cachedMenu.status === "recent_failure") {
       return NextResponse.json(
-        { error: cachedMenu.reason },
         {
-          status: 503,
+          error: cachedMenu.reason,
+          retryable: isTransientProviderFailureReason(cachedMenu.reason),
+        },
+        {
+          status: isTransientProviderFailureReason(cachedMenu.reason) ? 429 : 503,
           headers: {
             "X-Restaurant-Cache": "NEGATIVE-HIT",
             "Retry-After": Math.max(
@@ -97,15 +102,17 @@ export async function POST(request: Request) {
 
       let freshResult;
       try {
-        freshResult = await extractRestaurantMenus({
-          placeId,
-          restaurantName: typeof body.restaurantName === "string" ? body.restaurantName.trim() : undefined,
-          restaurantAddress: typeof body.restaurantAddress === "string"
-            ? body.restaurantAddress.trim().slice(0, 500)
-            : undefined,
-          mealProfile,
-          sources,
-        });
+        freshResult = await runProviderQueued(sources[0].provider, () =>
+          extractRestaurantMenus({
+            placeId,
+            restaurantName: typeof body.restaurantName === "string" ? body.restaurantName.trim() : undefined,
+            restaurantAddress: typeof body.restaurantAddress === "string"
+              ? body.restaurantAddress.trim().slice(0, 500)
+              : undefined,
+            mealProfile,
+            sources,
+          }),
+        );
       } catch (error) {
         try {
           storeMenuFailure(
@@ -125,8 +132,15 @@ export async function POST(request: Request) {
           console.warn("Menu cache write failed; returning fresh data:", cacheError);
         }
       } else {
+        const extractionWarnings = freshResult.menus.flatMap((menu) => menu.warnings);
+        const rateLimited = extractionWarnings.some((warning) =>
+          isTransientProviderFailureReason(warning),
+        );
+        const failureReason = rateLimited
+          ? "Grubhub temporarily rate-limited menu extraction (HTTP 429)."
+          : "No reliable menu-price sample was found recently.";
         try {
-          storeMenuFailure(placeId, sources, "No reliable menu-price sample was found recently.");
+          storeMenuFailure(placeId, sources, failureReason);
         } catch (cacheError) {
           console.warn("Menu failure cache write failed:", cacheError);
         }

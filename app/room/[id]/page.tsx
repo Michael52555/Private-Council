@@ -129,7 +129,10 @@ type CandidateOrderingState = {
   error?: string;
 };
 
-type RestaurantMenuApiResponse = RestaurantMenuResult | { error: string };
+type RestaurantMenuApiResponse = RestaurantMenuResult | {
+  error: string;
+  retryable?: boolean;
+};
 
 type CandidateMenuState =
   | { status: "loading" }
@@ -559,6 +562,31 @@ function activateGoogleBudgetFallback(
   };
 }
 
+function markBudgetTemporarilyUnavailable(
+  candidate: RestaurantCandidate,
+): RestaurantCandidate {
+  return {
+    ...candidate,
+    estimatedPriceMin: null,
+    estimatedPriceMax: null,
+    pricePerPerson: null,
+    budgetEstimateSource: "unavailable",
+    budgetEstimateConfidence: "none",
+    budgetEstimateCurrency: null,
+    menuStatus: "unavailable",
+  };
+}
+
+function menuResultWasRateLimited(result: RestaurantMenuResult): boolean {
+  return result.menus.some((menu) =>
+    menu.warnings.some((warning) =>
+      /(?:HTTP\s*429|too many requests|rate[ -]?limit|temporar(?:y|ily) unavailable)/i.test(
+        warning,
+      ),
+    ),
+  );
+}
+
 function BudgetEstimatePanel({ candidate }: { candidate: RestaurantCandidate }) {
   const isQueuedForMenu = candidate.menuStatus === "pending";
   const isCheckingMenu = candidate.menuStatus === "loading";
@@ -886,7 +914,10 @@ export default function RoomPage() {
   }
 
   async function handleGenerateCandidates() {
-    const forceRefreshFailedCaches = candidates.length > 0;
+    // Regenerating candidates must still reuse central provider/menu caches.
+    // Bypassing every cache entry here caused bursts of concurrent Grubhub
+    // requests, HTTP 429 responses, and a page full of generic Google bands.
+    const forceRefreshFailedCaches = false;
     const enrichmentRun =
       orderingDiscoveryRunRef.current + 1;
     orderingDiscoveryRunRef.current = enrichmentRun;
@@ -1092,7 +1123,10 @@ export default function RoomPage() {
       }
     }
 
-    await Promise.all([worker(), worker(), worker()]);
+    // Google Maps discovery can overlap, while the central provider queue
+    // serializes Grubhub extraction. Two workers keep a queued route below the
+    // route timeout without opening a burst of provider browser sessions.
+    await Promise.all([worker(), worker()]);
   }
 
   async function handleExtractPrimaryMenu(
@@ -1142,9 +1176,13 @@ export default function RoomPage() {
       );
       const data = (await response.json()) as RestaurantMenuApiResponse;
       if (!response.ok || "error" in data) {
-        throw new Error(
-          "error" in data ? data.error : "Could not extract the primary menu.",
-        );
+        const message = "error" in data
+          ? data.error
+          : "Could not extract the primary menu.";
+        if ("error" in data && data.retryable) {
+          throw new Error(`Temporary provider failure: ${message}`);
+        }
+        throw new Error(message);
       }
       if (
         typeof enrichmentRun === "number" &&
@@ -1163,6 +1201,12 @@ export default function RoomPage() {
           if (entry.id !== candidate.id) return entry;
           const hasReliablePriceSample = hasReliableMealEstimate(data.priceSummary);
           if (!hasReliablePriceSample) {
+            if (menuResultWasRateLimited(data)) {
+              return markBudgetTemporarilyUnavailable({
+                ...entry,
+                menuItemCount: data.items.length,
+              });
+            }
             return activateGoogleBudgetFallback(
               { ...entry, menuItemCount: data.items.length },
               "loaded",
@@ -1184,10 +1228,19 @@ export default function RoomPage() {
         }),
       );
     } catch (error) {
+      const errorMessage = error instanceof Error
+        ? error.message
+        : "Could not extract the primary menu.";
+      const isTemporaryFailure =
+        /(?:temporary provider failure|timed out|HTTP\s*429|too many requests|rate[ -]?limit)/i.test(
+          errorMessage,
+        );
       setCandidates((current) =>
         current.map((entry) =>
           entry.id === candidate.id
-            ? activateGoogleBudgetFallback(entry, "loaded")
+            ? isTemporaryFailure
+              ? markBudgetTemporarilyUnavailable(entry)
+              : activateGoogleBudgetFallback(entry, "loaded")
             : entry,
         ),
       );
@@ -1195,10 +1248,7 @@ export default function RoomPage() {
         ...current,
         [candidate.id]: {
           status: "error",
-          error:
-            error instanceof Error
-              ? error.message
-              : "Could not extract the primary menu.",
+          error: errorMessage,
         },
       }));
     }

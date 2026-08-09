@@ -13,10 +13,23 @@ import {
 
 const orderingSchemaVersion = 5;
 export const menuSchemaVersion = 3;
-const menuAttemptVersion = 6;
+const menuAttemptVersion = 7;
 const orderingSuccessLifetimeMs = 14 * 24 * 60 * 60 * 1000;
 const orderingEmptyLifetimeMs = 5 * 60 * 1000;
 const failureRetryMs = 3 * 60 * 60 * 1000;
+const transientProviderFailureRetryMs = 5 * 60 * 1000;
+
+export function isTransientProviderFailureReason(reason: string): boolean {
+  return /(?:HTTP\s*429|too many requests|rate[ -]?limit|temporar(?:y|ily) unavailable)/i.test(
+    reason,
+  );
+}
+
+export function menuFailureRetryDelayMs(reason: string): number {
+  return isTransientProviderFailureReason(reason)
+    ? transientProviderFailureRetryMs
+    : failureRetryMs;
+}
 
 export function isRestaurantCacheDisabled(): boolean {
   return /^(?:1|true|yes|on)$/i.test(
@@ -340,6 +353,7 @@ export function storeMenuFailure(
 ): void {
   if (isRestaurantCacheDisabled()) return;
   const now = Date.now();
+  const retryDelayMs = menuFailureRetryDelayMs(reason);
   database().prepare(`
     INSERT INTO restaurant_menu_cache (
       place_id, schema_version, status, source_fingerprint,
@@ -359,6 +373,6 @@ export function storeMenuFailure(
     menuSourceFingerprint(sources),
     reason,
     new Date(now).toISOString(),
-    new Date(now + failureRetryMs).toISOString(),
+    new Date(now + retryDelayMs).toISOString(),
   );
 }

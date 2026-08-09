@@ -286,6 +286,7 @@ export async function renderPublicPage(rawUrl: string, options: RenderMenuPageOp
     const pendingCaptures = new Set<Promise<void>>();
     let capturedBytes = 0;
     let blockedResponseCount = 0;
+    let rateLimitedResponseCount = 0;
     const capturedJsonEndpoints = new Set<string>();
     const blockedResponseEndpoints = new Set<string>();
 
@@ -302,6 +303,9 @@ export async function renderPublicPage(rawUrl: string, options: RenderMenuPageOp
       const ignoredEndpoint = isNonMenuProviderEndpoint(response.url());
       if (!ignoredEndpoint && [401, 403, 429].includes(response.status())) {
         blockedResponseCount += 1;
+        if (response.status() === 429) {
+          rateLimitedResponseCount += 1;
+        }
         if (blockedResponseEndpoints.size < 8) {
           blockedResponseEndpoints.add(safeEndpoint(response.url()));
         }
@@ -357,6 +361,7 @@ export async function renderPublicPage(rawUrl: string, options: RenderMenuPageOp
           locationSelectionSucceeded: false,
           capturedJsonResponseCount: jsonPayloads.length,
           blockedResponseCount,
+          rateLimitedResponseCount,
           capturedJsonEndpoints: [...capturedJsonEndpoints],
           blockedResponseEndpoints: [...blockedResponseEndpoints],
         },
@@ -399,6 +404,7 @@ export async function renderPublicPage(rawUrl: string, options: RenderMenuPageOp
         locationSelectionSucceeded: locationResult.succeeded,
         capturedJsonResponseCount: jsonPayloads.length,
         blockedResponseCount,
+        rateLimitedResponseCount,
         capturedJsonEndpoints: [...capturedJsonEndpoints],
         blockedResponseEndpoints: [...blockedResponseEndpoints],
       },

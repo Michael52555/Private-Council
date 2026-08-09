@@ -70,6 +70,7 @@ export type MenuBrowserDiagnostics = {
   locationSelectionSucceeded: boolean;
   capturedJsonResponseCount: number;
   blockedResponseCount: number;
+  rateLimitedResponseCount: number;
   capturedJsonEndpoints: string[];
   blockedResponseEndpoints: string[];
 };
