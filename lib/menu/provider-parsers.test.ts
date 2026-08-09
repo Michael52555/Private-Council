@@ -39,6 +39,88 @@ test("extracts DoorDash menu items but not modifier choices", () => {
   assert.equal(result.items[0].section, "Bowls");
 });
 
+test("extracts complete DoorDash sections, restaurant tags, and popular items", () => {
+  const source = makeOrderingSource({
+    url: "https://www.doordash.com/store/example-456",
+    discoveredFrom: "google_maps",
+  });
+  const result = extractProviderMenuFromJson([
+    {
+      url: "https://www.doordash.com/graphql/storePage",
+      status: 200,
+      contentType: "application/json",
+      data: {
+        data: {
+          store: {
+            name: "Example Bowls",
+            businessTags: [{ name: "Bowls" }, { name: "Healthy" }],
+            menus: [{
+              name: "Main Menu",
+              menuCategories: [
+                {
+                  name: "Most Ordered",
+                  items: [{
+                    name: "Chicken Teriyaki Bowl",
+                    description: "Chicken, rice, and vegetables",
+                    price: 1499,
+                    isPopular: true,
+                  }],
+                },
+                {
+                  name: "Bowls",
+                  items: [
+                    { name: "Chicken Teriyaki Bowl", price: 1499 },
+                    { name: "Salmon Bowl", price: 1799 },
+                  ],
+                },
+              ],
+            }],
+          },
+        },
+      },
+    },
+  ], source, "doordash");
+
+  assert.deepEqual(result.restaurantTags, ["Bowls", "Healthy"]);
+  assert.equal(result.items.length, 2);
+  assert.equal(result.items[0].name, "Chicken Teriyaki Bowl");
+  assert.equal(result.items[0].section, "Bowls");
+  assert.equal(result.items[0].featured, true);
+  assert.equal(result.items[1].price, 17.99);
+});
+
+test("extracts DoorDash menu cards from rendered semantic HTML", () => {
+  const source = makeOrderingSource({
+    url: "https://www.doordash.com/store/example-789",
+    discoveredFrom: "google_maps",
+  });
+  const result = extractProviderMenuFromHtml(`
+    <main>
+      <h2>Most Ordered</h2>
+      <article data-testid="MenuItem">
+        <h3 data-testid="item-name">Spicy Chicken Sandwich</h3>
+        <p>Crispy chicken with pickles</p>
+        <span>$12.49</span>
+        <span>Most ordered</span>
+      </article>
+      <h2>Drinks</h2>
+      <article data-testid="MenuItem">
+        <h3 data-testid="item-name">Iced Tea</h3>
+        <span>$3.25</span>
+      </article>
+    </main>
+  `, source, "doordash");
+
+  assert.deepEqual(result.items.map((item) => item.name), [
+    "Spicy Chicken Sandwich",
+    "Iced Tea",
+  ]);
+  assert.equal(result.items[0].section, "Most Ordered");
+  assert.equal(result.items[0].featured, true);
+  assert.equal(result.items[1].section, "Drinks");
+  assert(result.methods.has("dom"));
+});
+
 test("extracts Toast and Olo-style provider money schemas", () => {
   const source = makeOrderingSource({
     url: "https://order.toasttab.com/online/example",

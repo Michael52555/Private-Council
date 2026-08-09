@@ -620,7 +620,7 @@ function BudgetEstimatePanel({ candidate }: { candidate: RestaurantCandidate }) 
         <p className="mt-2 text-[10px] leading-4 text-gray-500">
           {isQueuedForMenu
             ? "Waiting for a central scraper worker; cached restaurants bypass this queue."
-            : "Google pricing is considered only after Grubhub Best Sellers extraction fails."}
+            : "Google pricing is considered only after Grubhub and DoorDash menu extraction fails."}
         </p>
       </div>
     );
@@ -644,12 +644,12 @@ function BudgetEstimatePanel({ candidate }: { candidate: RestaurantCandidate }) 
         </p>
       ) : (
         <p className="mt-2 leading-5 text-amber-200/80">
-          No numeric Grubhub menu or final Google fallback is available, so budget scoring remains pending.
+          No numeric delivery menu or final Google fallback is available, so budget scoring remains pending.
         </p>
       )}
       {candidate.budgetEstimateSource === "google_price_level" && (
         <p className="mt-2 text-[10px] leading-4 text-gray-500">
-          Grubhub did not produce a reliable estimate; this broad Google band is the final fallback.
+          Grubhub and DoorDash did not produce a reliable estimate; this broad Google band is the final fallback.
         </p>
       )}
     </div>
@@ -674,7 +674,7 @@ async function fetchWithTimeout(
     });
   } catch (error) {
     if (error instanceof DOMException && error.name === "AbortError") {
-      throw new Error("The Grubhub menu check timed out. Google pricing will be used only as the final fallback.");
+      throw new Error("The provider menu check timed out. Google pricing will be used only as the final fallback.");
     }
     throw error;
   } finally {
@@ -915,7 +915,7 @@ export default function RoomPage() {
 
   async function handleGenerateCandidates() {
     // Regenerating candidates must still reuse central provider/menu caches.
-    // Bypassing every cache entry here caused bursts of concurrent Grubhub
+    // Bypassing every cache entry here caused bursts of concurrent provider
     // requests, HTTP 429 responses, and a page full of generic Google bands.
     const forceRefreshFailedCaches = false;
     const enrichmentRun =
@@ -1123,8 +1123,8 @@ export default function RoomPage() {
       }
     }
 
-    // Google Maps discovery can overlap, while the central provider queue
-    // serializes Grubhub extraction. Two workers keep a queued route below the
+    // Google Maps discovery can overlap, while each central provider queue
+    // serializes extraction. Two workers keep a queued route below the
     // route timeout without opening a burst of provider browser sessions.
     await Promise.all([worker(), worker()]);
   }

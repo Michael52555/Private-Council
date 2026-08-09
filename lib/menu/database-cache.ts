@@ -12,10 +12,10 @@ import {
   summarizeTypicalMealPrices,
 } from "@/lib/menu/meal-estimate";
 
-const orderingSchemaVersion = 6;
+const orderingSchemaVersion = 7;
 // Kept only for reading the pre-split cache during the automatic migration.
 export const menuSchemaVersion = 4;
-const menuAttemptVersion = 10;
+const menuAttemptVersion = 11;
 const rawMenuSchemaVersion = 1;
 export const mealEstimatorVersion = 2;
 const orderingSuccessLifetimeMs = 14 * 24 * 60 * 60 * 1000;

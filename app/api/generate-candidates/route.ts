@@ -261,7 +261,7 @@ export async function POST(request: Request) {
       const usableMenuEstimate = hasReliableMealEstimate(cachedMenu.priceSummary);
       if (!usableMenuEstimate) {
         // An old raw-menu result without a usable meal estimate is not a hit.
-        // Keep this candidate pending so the Grubhub-first pipeline can retry.
+        // Keep this candidate pending so the supported-provider pipeline can retry.
         return candidate;
       }
       return {

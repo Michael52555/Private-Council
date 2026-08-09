@@ -1084,9 +1084,9 @@ export async function discoverGoogleOrderingLinks(
       ]),
     ].slice(0, 20);
 
-    // The product intentionally uses the first Grubhub result in Google Maps'
-    // delivery ordering list. Trying duplicate pickup/tracking variants adds a
-    // full browser scrape without improving the restaurant-level estimate.
+    // Use the first supported result in Google Maps' delivery ordering list.
+    // The supported set is intentionally small (Grubhub and DoorDash), and
+    // duplicate pickup/tracking variants do not improve a restaurant estimate.
     const dedupedSources = dedupeSources(sources).slice(0, 1);
     if (dedupedSources.length === 0) {
       if (!orderingModeResult.deliveryModeActivated) {
@@ -1099,7 +1099,7 @@ export async function discoverGoogleOrderingLinks(
         skippedUnsupportedControls.length > 0
       ) {
         warnings.push(
-          "Google Maps exposed ordering providers, but no Grubhub delivery source was found.",
+          "Google Maps exposed ordering providers, but no supported Grubhub or DoorDash delivery source was found.",
         );
       }
       warnings.push(
