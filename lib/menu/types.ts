@@ -78,6 +78,7 @@ export type MenuBrowserDiagnostics = {
 export type ExtractedMenu = {
   source: OrderingSource;
   items: MenuItem[];
+  restaurantTags?: string[];
   extractionMethod: "json_ld" | "embedded_json" | "dom" | "mixed" | "none";
   fetchedAt: string;
   warnings: string[];
@@ -97,6 +98,7 @@ export type RestaurantMenuResult = {
   placeId: string;
   restaurantName?: string;
   mealProfile?: RestaurantMealProfile;
+  restaurantTags?: string[];
   menus: ExtractedMenu[];
   items: MenuItem[];
   priceSummary: {

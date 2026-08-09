@@ -35,8 +35,10 @@ function mergeExtractions(
 ): HtmlMenuExtraction {
   const methods = new Set<"json_ld" | "embedded_json" | "dom">();
   const itemsByIdentity = new Map<string, MenuItem>();
+  const restaurantTags = new Set<string>();
   for (const extraction of extractions) {
     extraction.methods.forEach((method) => methods.add(method));
+    extraction.restaurantTags?.forEach((tag) => restaurantTags.add(tag));
     for (const item of extraction.items) {
       const key = `${item.name}|${item.price ?? ""}`.toLowerCase();
       const existing = itemsByIdentity.get(key);
@@ -45,7 +47,11 @@ function mergeExtractions(
       }
     }
   }
-  return { items: [...itemsByIdentity.values()].slice(0, 750), methods };
+  return {
+    items: [...itemsByIdentity.values()].slice(0, 750),
+    methods,
+    restaurantTags: [...restaurantTags].slice(0, 20),
+  };
 }
 
 export async function extractMenuFromSource(
@@ -170,6 +176,7 @@ export async function extractMenuFromSource(
   return {
     source,
     items: extraction.items,
+    restaurantTags: extraction.restaurantTags,
     extractionMethod: extractionMethod(extraction.methods),
     fetchedAt: new Date().toISOString(),
     warnings: [`Scraper adapter: ${adapter.label}`, ...warnings],
@@ -198,6 +205,7 @@ export async function extractMenusWithFallback(
     const mealSummary = summarizeTypicalMealPrices(menu.items, {
       restaurantName: context.restaurantName,
       mealProfile: context.mealProfile,
+      restaurantTags: menu.restaurantTags,
     });
     const hasReliablePriceSample = hasReliableMealEstimate(mealSummary);
     if (sourceIndex > 0 && hasReliablePriceSample) {
@@ -225,15 +233,20 @@ export async function extractRestaurantMenus(input: {
   });
 
   const items = menus.flatMap((menu) => menu.items);
+  const restaurantTags = [...new Set(
+    menus.flatMap((menu) => menu.restaurantTags ?? []),
+  )];
   return {
     placeId: input.placeId,
     restaurantName: input.restaurantName,
     mealProfile: input.mealProfile,
+    restaurantTags,
     menus,
     items,
     priceSummary: summarizeTypicalMealPrices(items, {
       restaurantName: input.restaurantName,
       mealProfile: input.mealProfile,
+      restaurantTags,
     }),
   };
 }

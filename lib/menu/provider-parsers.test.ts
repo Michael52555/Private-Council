@@ -117,6 +117,7 @@ test("extracts only the Grubhub Best Sellers section from semantic headings", ()
   });
   const result = extractProviderMenuFromHtml(`
     <main>
+      <p>Bowls, Dinner, Healthy · $$</p>
       <section>
         <h2>Best Sellers</h2>
         <p>Most ordered on Grubhub</p>
@@ -141,6 +142,29 @@ test("extracts only the Grubhub Best Sellers section from semantic headings", ()
   );
   assert(result.methods.has("dom"));
   assert(result.items.every((item) => item.section === "Best Sellers"));
+  assert.deepEqual(result.restaurantTags, ["Bowls", "Dinner", "Healthy"]);
+});
+
+test("extracts Grubhub restaurant cuisine tags from embedded state", () => {
+  const source = makeOrderingSource({
+    url: "https://www.grubhub.com/restaurant/example/123",
+    discoveredFrom: "google_maps",
+  });
+  const result = extractProviderMenuFromJson([
+    {
+      url: "https://www.grubhub.com/api/restaurant",
+      status: 200,
+      contentType: "application/json",
+      data: {
+        restaurant: {
+          cuisines: [{ name: "Sushi" }, { name: "Japanese" }],
+          categories: [{ name: "Best Sellers" }],
+        },
+      },
+    },
+  ], source, "grubhub");
+
+  assert.deepEqual(result.restaurantTags, ["Sushi", "Japanese"]);
 });
 
 test("uses a Grubhub Best Seller badge when the featured section is absent", () => {

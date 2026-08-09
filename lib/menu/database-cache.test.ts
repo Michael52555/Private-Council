@@ -134,7 +134,7 @@ test("the central database keeps the first reliable menu result", () => {
   assert.equal(batch.get("place-first-result")?.result.priceSummary.median, 12);
 });
 
-test("keeps stale raw items but retries when they no longer yield a meal estimate", () => {
+test("recomputes cached unit-item menus with the current basket estimator", () => {
   const orderingSource = source("https://doordash.com/store/kiyo", "doordash");
   const staleResult: RestaurantMenuResult = {
     placeId: "place-kiyo",
@@ -162,31 +162,11 @@ test("keeps stale raw items but retries when they no longer yield a meal estimat
 
   storeMenuSuccessOnce("place-kiyo", [orderingSource], staleResult);
 
-  assert.equal(readMenuCache("place-kiyo").status, "miss");
-  assert.equal(readSuccessfulMenuCacheBatch(["place-kiyo"]).size, 0);
-
-  storeMenuFailure(
-    "place-kiyo",
-    [orderingSource],
-    "No alternative provider produced a reliable meal estimate.",
-  );
-  assert.equal(readMenuCache("place-kiyo").status, "recent_failure");
-
-  const recoveredResult: RestaurantMenuResult = {
-    ...staleResult,
-    items: [18, 24, 30].map((price, index) => ({
-      id: `complete-meal-${index}`,
-      name: `Sushi Combination Meal ${index + 1}`,
-      section: "Complete Meals",
-      price,
-      currency: "USD",
-      sourceId: "alternative-source",
-    })),
-  };
-  storeMenuSuccessOnce("place-kiyo", [orderingSource], recoveredResult);
-  const recovered = readMenuCache("place-kiyo");
-  assert.equal(recovered.status, "success");
-  if (recovered.status === "success") {
-    assert.equal(recovered.result.priceSummary.median, 24);
+  const cached = readMenuCache("place-kiyo");
+  assert.equal(cached.status, "success");
+  if (cached.status === "success") {
+    assert.equal(cached.result.priceSummary.mealPattern, "unit_items");
+    assert.equal(cached.result.priceSummary.median, 18.75);
   }
+  assert.equal(readSuccessfulMenuCacheBatch(["place-kiyo"]).size, 1);
 });

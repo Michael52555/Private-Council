@@ -153,6 +153,7 @@ export async function POST(request: Request) {
         placeId,
         restaurantName: freshResult.restaurantName,
         mealProfile: freshResult.mealProfile,
+        restaurantTags: freshResult.restaurantTags,
         sourceProviders: sources.map((source) => source.provider),
         menuItemCount: freshResult.items.length,
         rawPricedItemCount: freshResult.items.filter(

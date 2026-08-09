@@ -10,6 +10,7 @@ type JsonObject = Record<string, unknown>;
 export type HtmlMenuExtraction = {
   items: MenuItem[];
   methods: Set<"json_ld" | "embedded_json" | "dom">;
+  restaurantTags?: string[];
 };
 
 function isObject(value: unknown): value is JsonObject {
