@@ -1004,14 +1004,14 @@ export async function discoverGoogleOrderingLinks(
       .filter((candidate) => !activeProviderAdapterForUrl(candidate.href))
       .map((candidate) => candidate.text || new URL(candidate.href).hostname);
 
-    sources.push(
-      ...supportedSelectedLinks.map((candidate) =>
+    if (primarySelectedLink) {
+      sources.push(
         sourceFromCandidate(
-          candidate,
+          primarySelectedLink,
           dialogVisible ? "google_maps_dialog" : "google_maps_new_link",
         ),
-      ),
-    );
+      );
+    }
 
     const providerControls = !primarySelectedLink
       ? await findProviderControls(orderingPage, new Set(visibleControlLabels))
@@ -1039,8 +1039,9 @@ export async function discoverGoogleOrderingLinks(
     );
     if (!primarySelectedLink && supportedNavigationCandidates.length > 0) {
       sources.push(
-        ...supportedNavigationCandidates.map((candidate) =>
-          sourceFromCandidate(candidate, "google_maps_navigation"),
+        sourceFromCandidate(
+          supportedNavigationCandidates[0],
+          "google_maps_navigation",
         ),
       );
     }
@@ -1072,7 +1073,10 @@ export async function discoverGoogleOrderingLinks(
       ]),
     ].slice(0, 20);
 
-    const dedupedSources = dedupeSources(sources).slice(0, 6);
+    // The product intentionally uses the first Grubhub result in Google Maps'
+    // delivery ordering list. Trying duplicate pickup/tracking variants adds a
+    // full browser scrape without improving the restaurant-level estimate.
+    const dedupedSources = dedupeSources(sources).slice(0, 1);
     if (dedupedSources.length === 0) {
       if (!orderingModeResult.deliveryModeActivated) {
         warnings.push(

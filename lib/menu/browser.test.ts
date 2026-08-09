@@ -49,6 +49,15 @@ test("skips non-Grubhub providers and selects Grubhub", () => {
   assert.equal(selected?.href, "https://www.grubhub.com/restaurant/pressed-123");
 });
 
+test("selects only the first Grubhub link when Google exposes variants", () => {
+  const selected = selectFirstSupportedOrderingLink([
+    { href: "https://www.grubhub.com/restaurant/subway-delivery", text: "Grubhub delivery" },
+    { href: "https://www.grubhub.com/restaurant/subway-pickup", text: "Grubhub pickup" },
+  ]);
+
+  assert.equal(selected?.href, "https://www.grubhub.com/restaurant/subway-delivery");
+});
+
 test("keeps only Grubhub ordering links", () => {
   const selected = selectSupportedOrderingLinks([
     { href: "https://pressed.com/order", text: "Pressed" },

@@ -53,6 +53,7 @@ const MAIN_PATTERN = /\b(?:mains?|entrées?|entrees?|burgers?|sandwich(?:es)?|wr
 const SHARED_ITEM_PATTERN = /\b(?:family style|to share|shared|large plates?|hot pot|whole fish|whole chicken)\b/i;
 const UNIT_PRICED_RESTAURANT_PATTERN = /\b(?:sushi|izakaya)\b/i;
 const FAST_FOOD_UNIT_PATTERN = /\b(?:single|individual|a la carte|à la carte|tacos?|wings?|nuggets?|tenders?|pieces?)\b/i;
+const FEATURED_SECTION_PATTERN = /^(?:best\s*sellers?|most ordered(?: on grubhub)?|popular items?)$/i;
 
 function itemText(item: MenuItem): string {
   return `${item.section ?? ""} ${item.name} ${item.description ?? ""}`
@@ -159,6 +160,7 @@ export function estimateMealComposition(
   const sides = roleItems("side");
   const drinks = roleItems("drink");
   const unitItems = roleItems("unit_item");
+  const unknownItems = roleItems("unknown");
   const restaurantName = context.restaurantName ?? "";
   const mealProfile = context.mealProfile ?? classifyRestaurantMealProfile({
     name: restaurantName,
@@ -176,9 +178,23 @@ export function estimateMealComposition(
   }
 
   if (mealProfile === "fast_food") {
-    const fastFoodMains = regularMains.filter(
+    const recognizedFastFoodMains = regularMains.filter(
       (item) => !FAST_FOOD_UNIT_PATTERN.test(itemText(item)),
     );
+    const featuredBrandedMains = unknownItems.filter(
+      (item) => FEATURED_SECTION_PATTERN.test(item.section ?? ""),
+    );
+    const fastFoodMains = [
+      ...recognizedFastFoodMains,
+      ...featuredBrandedMains,
+    ];
+    const reliesOnBrandedFallback = featuredBrandedMains.length > 0;
+    // Grubhub's Best Sellers are already a deliberately narrow section. Fast-food
+    // chains often use branded product names (for example Subway Series names)
+    // that contain none of our generic "sandwich/burger/combo" keywords. Treat
+    // those otherwise-unclassified featured products as mains, but require three
+    // examples so a single branded side or dessert cannot create an estimate.
+    if (reliesOnBrandedFallback && fastFoodMains.length < 3) return null;
     if (fastFoodMains.length < 2) return null;
     const main = distribution(fastFoodMains);
     const side = sides.length > 0 ? distribution(sides) : null;
