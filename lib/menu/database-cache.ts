@@ -13,7 +13,7 @@ import {
 
 const orderingSchemaVersion = 6;
 export const menuSchemaVersion = 3;
-const menuAttemptVersion = 7;
+const menuAttemptVersion = 8;
 const orderingSuccessLifetimeMs = 14 * 24 * 60 * 60 * 1000;
 const orderingEmptyLifetimeMs = 5 * 60 * 1000;
 const failureRetryMs = 3 * 60 * 60 * 1000;

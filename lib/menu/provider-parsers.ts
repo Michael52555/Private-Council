@@ -14,6 +14,7 @@ type ProviderSchema = {
 
 const COMMON_IGNORED_COLLECTIONS = /modifier|customization|option|choice|add-?on|upsell|recommendation|comboStep/i;
 const GRUBHUB_BEST_SELLER_SECTION = /^(?:best\s*sellers?|most ordered(?: on grubhub)?|popular items?)$/i;
+const PRICE_ONLY_MENU_TEXT = /^(?:from\s*)?\$\s*[0-9]+(?:\.[0-9]{1,2})?\+?$/i;
 
 const PROVIDER_SCHEMAS: Record<MenuAdapterId, ProviderSchema> = {
   doordash: {
@@ -84,6 +85,10 @@ function isObject(value: unknown): value is JsonObject {
 
 function firstString(...values: unknown[]): string | undefined {
   return values.find((value): value is string => typeof value === "string" && value.trim().length > 0)?.trim();
+}
+
+function isPriceOnlyMenuText(value: string): boolean {
+  return PRICE_ONLY_MENU_TEXT.test(value.replace(/\s+/g, " ").trim());
 }
 
 function priceNumber(value: unknown, centsLikely = false): number | undefined {
@@ -169,6 +174,7 @@ function itemFromNode(
     node.title,
   )?.replace(/\s+/g, " ");
   if (!name || name.length > 180) return undefined;
+  if (isPriceOnlyMenuText(name)) return undefined;
   if (/subtotal|delivery fee|service fee|tax|total|minimum order/i.test(name)) return undefined;
   if (/^(?:add|choose|select|remove|no |extra )/i.test(name)) return undefined;
   if (/utensils?|napkins?|cutlery|special instructions?/i.test(name)) return undefined;
@@ -278,15 +284,67 @@ function extractGrubhubSemanticDom(
   let insideBestSellers = false;
   let bestSellerHeadingLevel = 6;
 
+  const plausibleProductName = (value: string, currentHeading: string): string | undefined => {
+    const candidate = value.replace(/\s+/g, " ").trim();
+    if (!candidate || candidate === currentHeading) return undefined;
+    if (candidate.length < 2 || candidate.length > 120) return undefined;
+    if (isPriceOnlyMenuText(candidate) || /\$[0-9]/.test(candidate)) return undefined;
+    if (nonItemHeading.test(candidate)) return undefined;
+    if (/^(?:best seller|most ordered on grubhub|add|customize|order|details?|more)$/i.test(candidate)) {
+      return undefined;
+    }
+    return candidate;
+  };
+
+  const productNameFromContainer = (
+    container: ReturnType<typeof $>,
+    currentHeading: string,
+  ): string | undefined => {
+    const targetedSelectors = [
+      "[data-testid*='item-name']",
+      "[data-testid*='itemName']",
+      "[data-qa*='item-name']",
+      "[data-qa*='itemName']",
+      "[class*='item-name']",
+      "[class*='itemName']",
+      "h1",
+      "h2",
+      "h3",
+      "h4",
+      "h5",
+      "h6",
+    ].join(", ");
+    for (const element of container.find(targetedSelectors).toArray()) {
+      const candidate = plausibleProductName($(element).text(), currentHeading);
+      if (candidate) return candidate;
+    }
+    for (const image of container.find("img[alt]").toArray()) {
+      const candidate = plausibleProductName($(image).attr("alt") ?? "", currentHeading);
+      if (candidate) return candidate;
+    }
+    // Some Grubhub cards render the product name as an ordinary span/div while
+    // exposing only the price as a semantic heading. Read the element's own text
+    // nodes in DOM order so the card title wins over its later description.
+    for (const element of container.find("*").addBack().toArray()) {
+      const ownText = $(element)
+        .contents()
+        .filter((_, node) => node.type === "text")
+        .text();
+      const candidate = plausibleProductName(ownText, currentHeading);
+      if (candidate) return candidate;
+    }
+    return undefined;
+  };
+
   $("h1, h2, h3, h4, h5, h6, [role='heading']").each((_, element) => {
-    const name = $(element).text().replace(/\s+/g, " ").trim();
+    const headingText = $(element).text().replace(/\s+/g, " ").trim();
     const tagMatch = element.type === "tag"
       ? element.name.match(/^h([1-6])$/i)
       : null;
     const headingLevel = Number(
       $(element).attr("aria-level") ?? tagMatch?.[1] ?? 6,
     );
-    if (GRUBHUB_BEST_SELLER_SECTION.test(name)) {
+    if (GRUBHUB_BEST_SELLER_SECTION.test(headingText)) {
       insideBestSellers = true;
       bestSellerHeadingLevel = Number.isFinite(headingLevel) ? headingLevel : 6;
       return;
@@ -294,17 +352,18 @@ function extractGrubhubSemanticDom(
     if (insideBestSellers && headingLevel <= bestSellerHeadingLevel) {
       insideBestSellers = false;
     }
-    if (!name || name.length > 180 || nonItemHeading.test(name)) return;
+    if (!headingText || headingText.length > 180 || nonItemHeading.test(headingText)) return;
 
     let container = $(element);
     let price: number | undefined;
+    let name = isPriceOnlyMenuText(headingText) ? undefined : headingText;
     for (let depth = 0; depth < 6; depth += 1) {
       // Do not climb from a category heading into a wrapper that contains many
       // product cards. Otherwise the first descendant price can make headings
       // such as "Entrées" look like a Best Seller menu item.
       if (
         depth > 0 &&
-        container.find("h1, h2, h3, h4, h5, h6, [role='heading']").length > 1
+        container.find("h1, h2, h3, h4, h5, h6, [role='heading']").length > 2
       ) {
         break;
       }
@@ -312,11 +371,13 @@ function extractGrubhubSemanticDom(
       const prices = [...text.matchAll(/\$([0-9]+(?:\.[0-9]{2})?)(?:\+)?/g)];
       if (prices.length >= 1 && prices.length <= 2) {
         price = Number(prices[0][1]);
-        break;
+        name ??= productNameFromContainer(container, headingText);
+        if (name) break;
       }
       container = container.parent();
       if (container.length === 0) break;
     }
+    if (!name || isPriceOnlyMenuText(name)) return;
     if (price === undefined || !Number.isFinite(price)) return;
     const hasBestSellerBadge = container
       .find("*")
