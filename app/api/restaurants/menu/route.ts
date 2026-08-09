@@ -47,7 +47,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "At least one ordering source is required." }, { status: 400 });
     }
 
-    // The unified pipeline intentionally scrapes only the first Grubhub result.
+    // The unified pipeline intentionally scrapes only the first supported result.
     // Enforce that at the API boundary as well so an older browser/database cache
     // cannot make one restaurant trigger duplicate provider sessions.
     const sources = body.sources.filter(isOrderingSource).slice(0, 1);
@@ -134,7 +134,7 @@ export async function POST(request: Request) {
       ).length;
       // Persist extracted facts even when today's estimator cannot yet turn them
       // into a reliable per-person basket. A later estimator version can reuse
-      // these prices without hitting Grubhub again.
+      // these prices without hitting the provider again.
       if (rawPricedItemCount > 0) {
         try {
           storeMenuSuccessOnce(placeId, sources, freshResult);
@@ -148,7 +148,7 @@ export async function POST(request: Request) {
           isTransientProviderFailureReason(warning),
         );
         const failureReason = rateLimited
-          ? "Grubhub temporarily rate-limited menu extraction (HTTP 429)."
+          ? `${sources[0].label} temporarily rate-limited menu extraction (HTTP 429).`
           : "No reliable menu-price sample was found recently.";
         try {
           storeMenuFailure(placeId, sources, failureReason);

@@ -33,7 +33,7 @@ function extractionMethod(
 function mergeExtractions(
   extractions: HtmlMenuExtraction[],
 ): HtmlMenuExtraction {
-  const featuredSection = /^(?:best\s*sellers?|most ordered(?: on grubhub)?|popular items?)$/i;
+  const featuredSection = /^(?:best\s*sellers?|most ordered(?: on (?:grubhub|doordash))?|popular items?|most liked|top picks?)$/i;
   const methods = new Set<"json_ld" | "embedded_json" | "dom">();
   const itemsByIdentity = new Map<string, MenuItem>();
   const restaurantTags = new Set<string>();
@@ -99,7 +99,7 @@ export async function extractMenuFromSource(
     source,
     adapter.id,
   );
-  const providerScopedExtraction = adapter.id === "grubhub";
+  const providerScopedExtraction = adapter.id === "grubhub" || adapter.id === "doordash";
   let extraction = providerScopedExtraction
     ? directProviderExtraction
     : directProviderExtraction.items.length >= 3

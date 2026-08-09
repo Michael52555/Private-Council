@@ -52,7 +52,7 @@ const SIDE_PATTERN = /\b(?:sides?|fries|chips|mashed potatoes|coleslaw|slaw|side
 const SMALL_PLATE_PATTERN = /\b(?:appetizers?|starters?|small plates?|tapas|dim\s*sum|snacks?|mezze)\b/i;
 const UNIT_ITEM_PATTERN = /\b(?:nigiri|sashimi|hand rolls?|maki|sushi rolls?|tacos?|sliders?|dumplings?|gyoza|bao|by the piece|per piece|individual pieces?)\b/i;
 const MAIN_PATTERN = /\b(?:mains?|entrées?|entrees?|burgers?|sandwich(?:es)?|wraps?|burritos?|quesadillas?|pizza|ramen|udon|noodles?|pasta|curry|(?:rice )?bowls?|donburi|poke|steak|ribs?|brisket|chicken|beef|pork|lamb|seafood|fish|wings?|nuggets?|tenders?|salads?)\b/i;
-const FEATURED_SECTION_PATTERN = /^(?:best\s*sellers?|most ordered(?: on grubhub)?|popular items?)$/i;
+const FEATURED_SECTION_PATTERN = /^(?:best\s*sellers?|most ordered(?: on (?:grubhub|doordash))?|popular items?|most liked|top picks?)$/i;
 
 const SECTION_ACCESSORY_PATTERN = /^(?:add[ -]?ons?|extras?|sauces?|dips?|dressings?|toppings?|condiments?)$/i;
 const SECTION_DRINK_PATTERN = /^(?:beverages?|drinks?|coffee|tea|smoothies?|juices?|beer|wine|cocktails?)$/i;
@@ -268,7 +268,7 @@ function unknownMainCandidates(
   if (featured.length >= 2) return featured;
 
   // Branded products often have names that do not say "bowl" or "salad".
-  // Grubhub's restaurant-level tags provide enough evidence to treat them as
+  // Provider restaurant-level tags provide enough evidence to treat them as
   // mains even when the restaurant has no Best Sellers section.
   const tagText = (context.restaurantTags ?? []).join(" ");
   if (
@@ -369,7 +369,7 @@ export function estimateMealComposition(
   const scores = basketScores(priced, roles, context);
 
   // Existing Google fast-food labels are only a weak tie-breaker. The menu and
-  // Grubhub tags remain the primary evidence.
+  // Provider tags remain the primary evidence.
   if (
     context.mealProfile === "fast_food" &&
     regularMains.length === 0 &&

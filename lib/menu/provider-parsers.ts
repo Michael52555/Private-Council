@@ -13,14 +13,15 @@ type ProviderSchema = {
 };
 
 const COMMON_IGNORED_COLLECTIONS = /modifier|customization|option|choice|add-?on|upsell|recommendation|comboStep/i;
-const GRUBHUB_BEST_SELLER_SECTION = /^(?:best\s*sellers?|most ordered(?: on grubhub)?|popular items?)$/i;
+const FEATURED_MENU_SECTION = /^(?:best\s*sellers?|most ordered(?: on (?:grubhub|doordash))?|popular items?|most liked|top picks?)$/i;
 const PRICE_ONLY_MENU_TEXT = /^(?:from\s*)?\$\s*[0-9]+(?:\.[0-9]{1,2})?\+?$/i;
 const GRUBHUB_RESTAURANT_TAG_KEYS = /^(?:cuisines?|restaurantCuisines?|restaurant_cuisines?|restaurantTags?|restaurant_tags?|foodTypes?|food_types?)$/i;
+const DOORDASH_RESTAURANT_TAG_KEYS = /^(?:cuisines?|businessTags?|storeTags?|merchantTags?|storeCategories?|restaurantTags?)$/i;
 
 const PROVIDER_SCHEMAS: Record<MenuAdapterId, ProviderSchema> = {
   doordash: {
-    itemCollections: /^(?:items|menuItems|itemList|products|storeItems)$/i,
-    sectionCollections: /^(?:menus|categories|menuCategories|sections)$/i,
+    itemCollections: /^(?:items|menuItems|itemList|products|storeItems|menuItemList)$/i,
+    sectionCollections: /^(?:menus|categories|menuCategories|sections|menuList|menuSections)$/i,
     ignoredCollections: COMMON_IGNORED_COLLECTIONS,
   },
   ubereats: {
@@ -247,7 +248,7 @@ function walkProviderPayload(
     if (
       item &&
       (hasBestSellerMarker(value) ||
-        GRUBHUB_BEST_SELLER_SECTION.test(context.section ?? ""))
+        FEATURED_MENU_SECTION.test(context.section ?? ""))
     ) {
       item.featured = true;
     }
@@ -277,10 +278,10 @@ function dedupe(items: MenuItem[]): MenuItem[] {
       byIdentity.set(key, item);
       continue;
     }
-    const existingIsFeaturedSection = GRUBHUB_BEST_SELLER_SECTION.test(
+    const existingIsFeaturedSection = FEATURED_MENU_SECTION.test(
       existing.section ?? "",
     );
-    const nextIsFeaturedSection = GRUBHUB_BEST_SELLER_SECTION.test(
+    const nextIsFeaturedSection = FEATURED_MENU_SECTION.test(
       item.section ?? "",
     );
     byIdentity.set(key, {
@@ -328,7 +329,10 @@ function restaurantTagsFromValue(value: unknown): string[] {
   return tags;
 }
 
-function extractGrubhubRestaurantTagsFromJson(value: unknown): string[] {
+function extractRestaurantTagsFromJson(
+  value: unknown,
+  tagKeys: RegExp,
+): string[] {
   const tags = new Set<string>();
   const seen = new WeakSet<object>();
   const visit = (current: unknown, depth: number): void => {
@@ -340,7 +344,7 @@ function extractGrubhubRestaurantTagsFromJson(value: unknown): string[] {
     if (!isObject(current) || seen.has(current)) return;
     seen.add(current);
     for (const [key, child] of Object.entries(current)) {
-      if (GRUBHUB_RESTAURANT_TAG_KEYS.test(key)) {
+      if (tagKeys.test(key)) {
         restaurantTagsFromValue(child).forEach((tag) => tags.add(tag));
       }
       visit(child, depth + 1);
@@ -350,7 +354,7 @@ function extractGrubhubRestaurantTagsFromJson(value: unknown): string[] {
   return [...tags];
 }
 
-function extractGrubhubRestaurantTagsFromDom(html: string): string[] {
+function extractRestaurantTagsFromDom(html: string): string[] {
   const $ = cheerio.load(html);
   const tags = new Set<string>();
   $("body *").each((_, element) => {
@@ -437,7 +441,7 @@ function extractGrubhubSemanticDom(
     const headingLevel = Number(
       $(element).attr("aria-level") ?? tagMatch?.[1] ?? 6,
     );
-    if (GRUBHUB_BEST_SELLER_SECTION.test(headingText)) {
+    if (FEATURED_MENU_SECTION.test(headingText)) {
       currentSection = "Best Sellers";
       return;
     }
@@ -485,7 +489,7 @@ function extractGrubhubSemanticDom(
       .addBack()
       .toArray()
       .some((node) => /^best seller$/i.test($(node).text().replace(/\s+/g, " ").trim()));
-    const featured = hasBestSellerBadge || GRUBHUB_BEST_SELLER_SECTION.test(
+    const featured = hasBestSellerBadge || FEATURED_MENU_SECTION.test(
       currentSection ?? "",
     );
     const description = container
@@ -508,6 +512,118 @@ function extractGrubhubSemanticDom(
   return dedupe(items);
 }
 
+function extractDoorDashSemanticDom(
+  html: string,
+  source: OrderingSource,
+): MenuItem[] {
+  const $ = cheerio.load(html);
+  const items: MenuItem[] = [];
+  const cardSelector = [
+    "[data-testid='MenuItem']",
+    "[data-testid^='MenuItem-']",
+    "[data-testid*='menu-item-card']",
+    "[data-anchor-id*='MenuItem']",
+    "[data-telemetry-id*='menu-item']",
+    "article",
+  ].join(", ");
+  const ignoredHeading = /^(?:menu|delivery|pickup|reviews?|hours|faqs?|offers?|store info|see more)$/i;
+  let currentSection: string | undefined;
+
+  const productName = (container: ReturnType<typeof $>): string | undefined => {
+    const selectors = [
+      "[data-testid*='item-name']",
+      "[data-testid*='itemName']",
+      "[data-qa*='item-name']",
+      "[class*='item-name']",
+      "[class*='itemName']",
+      "h2",
+      "h3",
+      "h4",
+      "h5",
+      "[role='heading']",
+    ].join(", ");
+    for (const element of container.find(selectors).toArray()) {
+      const candidate = $(element)
+        .text()
+        .replace(/\s*(?:from\s*)?\$[0-9]+(?:\.[0-9]{1,2})?\+?.*$/i, "")
+        .replace(/\s+/g, " ")
+        .trim();
+      if (
+        candidate.length >= 2 &&
+        candidate.length <= 140 &&
+        !isPriceOnlyMenuText(candidate) &&
+        !ignoredHeading.test(candidate) &&
+        !FEATURED_MENU_SECTION.test(candidate)
+      ) {
+        return candidate;
+      }
+    }
+    for (const image of container.find("img[alt]").toArray()) {
+      const candidate = ($(image).attr("alt") ?? "").replace(/\s+/g, " ").trim();
+      if (candidate.length >= 2 && candidate.length <= 140 && !ignoredHeading.test(candidate)) {
+        return candidate;
+      }
+    }
+    return undefined;
+  };
+
+  const readCard = (container: ReturnType<typeof $>) => {
+    const text = container.text().replace(/\s+/g, " ").trim();
+    if (!text || text.length > 2_000) return;
+    const priceMatches = [...text.matchAll(/\$\s*([0-9]+(?:\.[0-9]{1,2})?)(?:\+)?/g)];
+    if (priceMatches.length < 1 || priceMatches.length > 3) return;
+    const price = Number(priceMatches[0][1]);
+    const name = productName(container);
+    if (!name || !Number.isFinite(price)) return;
+    const description = container
+      .find("p, [data-testid*='description']")
+      .first()
+      .text()
+      .replace(/\s+/g, " ")
+      .trim();
+    const featured = FEATURED_MENU_SECTION.test(currentSection ?? "") ||
+      /\b(?:best seller|most ordered|most liked|popular)\b/i.test(text);
+    items.push({
+      id: itemId(source.id, name, currentSection, price),
+      name,
+      ...(description && description !== name ? { description } : {}),
+      ...(currentSection ? { section: currentSection } : {}),
+      ...(featured ? { featured: true } : {}),
+      price: Math.round(price * 100) / 100,
+      currency: "USD",
+      sourceId: source.id,
+    });
+  };
+
+  $("body *").each((_, element) => {
+    const node = $(element);
+    if (node.is("h2, h3, h4, [role='heading'][aria-level='2'], [role='heading'][aria-level='3'], [role='heading'][aria-level='4']")) {
+      if (node.parents(cardSelector).length > 0) return;
+      const heading = node.text().replace(/\s+/g, " ").trim();
+      if (
+        heading.length >= 2 &&
+        heading.length <= 120 &&
+        !ignoredHeading.test(heading) &&
+        !/\$[0-9]/.test(heading)
+      ) {
+        currentSection = FEATURED_MENU_SECTION.test(heading) ? "Most Ordered" : heading;
+      }
+      return;
+    }
+    if (node.is(cardSelector) && node.parents(cardSelector).length === 0) {
+      readCard(node);
+    }
+  });
+
+  // Some DoorDash layouts expose each product only as a button and do not use
+  // stable MenuItem test IDs. Limit this fallback to compact, price-bearing
+  // controls so delivery fees and store-level promotional panels stay out.
+  if (items.length === 0) {
+    $("button, [role='button']").each((_, element) => readCard($(element)));
+  }
+  return dedupe(items);
+}
+
 export function extractProviderMenuFromJson(
   payloads: CapturedJsonPayload[],
   source: OrderingSource,
@@ -518,7 +634,11 @@ export function extractProviderMenuFromJson(
   const schema = PROVIDER_SCHEMAS[adapterId];
   for (const payload of payloads) {
     if (adapterId === "grubhub") {
-      extractGrubhubRestaurantTagsFromJson(payload.data).forEach((tag) =>
+      extractRestaurantTagsFromJson(payload.data, GRUBHUB_RESTAURANT_TAG_KEYS).forEach((tag) =>
+        restaurantTags.add(tag),
+      );
+    } else if (adapterId === "doordash") {
+      extractRestaurantTagsFromJson(payload.data, DOORDASH_RESTAURANT_TAG_KEYS).forEach((tag) =>
         restaurantTags.add(tag),
       );
     }
@@ -572,11 +692,13 @@ export function extractProviderMenuFromHtml(
   const embedded = extractProviderMenuFromJson(payloads, source, adapterId);
   const semanticItems = adapterId === "grubhub"
     ? extractGrubhubSemanticDom(html, source)
-    : [];
-  const restaurantTags = adapterId === "grubhub"
+    : adapterId === "doordash"
+      ? extractDoorDashSemanticDom(html, source)
+      : [];
+  const restaurantTags = adapterId === "grubhub" || adapterId === "doordash"
     ? [...new Set([
         ...(embedded.restaurantTags ?? []),
-        ...extractGrubhubRestaurantTagsFromDom(html),
+        ...extractRestaurantTagsFromDom(html),
       ])]
     : [];
   const items = dedupe([...embedded.items, ...semanticItems]).slice(0, 750);

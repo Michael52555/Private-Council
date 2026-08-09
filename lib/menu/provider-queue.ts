@@ -26,6 +26,10 @@ const providerCooldownMs: Partial<Record<OrderingProvider, number>> = {
   // extractions start together. Central-model work is therefore serialized
   // and briefly spaced even when several clients request it concurrently.
   grubhub: 2_500,
+  // DoorDash also serves dynamic, browser-backed menus and can throttle bursts
+  // independently of Grubhub. Keep a separate provider queue so the two
+  // integrations can proceed concurrently without hammering either platform.
+  doordash: 2_500,
 };
 
 export async function runProviderQueued<T>(

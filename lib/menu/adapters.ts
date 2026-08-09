@@ -28,6 +28,7 @@ export type MenuProviderAdapter = {
 // integrations, while preserving Google's top-to-bottom link order.
 export const ACTIVE_PROVIDER_ADAPTER_IDS = [
   "grubhub",
+  "doordash",
 ] as const satisfies readonly MenuAdapterId[];
 
 const activeProviderAdapterIds = new Set<MenuAdapterId>(
