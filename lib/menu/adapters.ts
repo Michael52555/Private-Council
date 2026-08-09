@@ -26,19 +26,12 @@ export type MenuProviderAdapter = {
 // Google Maps can mix restaurant-owned websites with ordering platforms in the
 // same panel. New discovery deliberately selects only these reusable provider
 // integrations, while preserving Google's top-to-bottom link order.
-export const MAJOR_PROVIDER_ADAPTER_IDS = [
-  "doordash",
-  "ubereats",
+export const ACTIVE_PROVIDER_ADAPTER_IDS = [
   "grubhub",
-  "toast",
-  "olo",
-  "chownow",
-  "square",
-  "clover",
 ] as const satisfies readonly MenuAdapterId[];
 
-const majorProviderAdapterIds = new Set<MenuAdapterId>(
-  MAJOR_PROVIDER_ADAPTER_IDS,
+const activeProviderAdapterIds = new Set<MenuAdapterId>(
+  ACTIVE_PROVIDER_ADAPTER_IDS,
 );
 
 // This registry is intentionally explicit. Google Maps links that are not in
@@ -171,26 +164,26 @@ export function menuAdapterForControlLabel(
   );
 }
 
-export function majorProviderAdapterForUrl(
+export function activeProviderAdapterForUrl(
   rawUrl: string,
 ): MenuProviderAdapter | undefined {
   const adapter = menuAdapterForUrl(rawUrl);
-  return adapter && majorProviderAdapterIds.has(adapter.id)
+  return adapter && activeProviderAdapterIds.has(adapter.id)
     ? adapter
     : undefined;
 }
 
-export function majorProviderAdapterForControlLabel(
+export function activeProviderAdapterForControlLabel(
   label: string,
 ): MenuProviderAdapter | undefined {
   const domains = label.match(/(?:[a-z0-9-]+\.)+[a-z]{2,}/gi) ?? [];
   for (const domain of domains) {
-    const adapter = majorProviderAdapterForUrl(`https://${domain}`);
+    const adapter = activeProviderAdapterForUrl(`https://${domain}`);
     if (adapter) return adapter;
   }
   return MENU_PROVIDER_ADAPTERS.find(
     (adapter) =>
-      majorProviderAdapterIds.has(adapter.id) &&
+      activeProviderAdapterIds.has(adapter.id) &&
       adapter.controlAliases.some((alias) => alias.test(label)),
   );
 }

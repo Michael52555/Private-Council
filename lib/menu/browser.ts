@@ -13,8 +13,8 @@ import {
   unwrapGoogleRedirect,
 } from "@/lib/menu/providers";
 import {
-  majorProviderAdapterForControlLabel,
-  majorProviderAdapterForUrl,
+  activeProviderAdapterForControlLabel,
+  activeProviderAdapterForUrl,
   type MenuAdapterId,
 } from "@/lib/menu/adapters";
 import { assertPublicHttpsUrl } from "@/lib/menu/security";
@@ -798,7 +798,7 @@ export function selectFirstSupportedOrderingLink(
   links: LinkCandidate[],
 ): LinkCandidate | undefined {
   return links.find((candidate) =>
-    Boolean(majorProviderAdapterForUrl(candidate.href)),
+    Boolean(activeProviderAdapterForUrl(candidate.href)),
   );
 }
 
@@ -806,7 +806,7 @@ export function selectSupportedOrderingLinks(
   links: LinkCandidate[],
 ): LinkCandidate[] {
   return links.filter((candidate) =>
-    Boolean(majorProviderAdapterForUrl(candidate.href)),
+    Boolean(activeProviderAdapterForUrl(candidate.href)),
   );
 }
 
@@ -995,7 +995,7 @@ export async function discoverGoogleOrderingLinks(
           ? selectedLinks.indexOf(primarySelectedLink)
           : selectedLinks.length,
       )
-      .filter((candidate) => !majorProviderAdapterForUrl(candidate.href))
+      .filter((candidate) => !activeProviderAdapterForUrl(candidate.href))
       .map((candidate) => candidate.text || new URL(candidate.href).hostname);
 
     sources.push(
@@ -1011,7 +1011,7 @@ export async function discoverGoogleOrderingLinks(
       ? await findProviderControls(orderingPage, new Set(visibleControlLabels))
       : [];
     const primaryProviderControl = providerControls.find((candidate) =>
-      Boolean(majorProviderAdapterForControlLabel(candidate.label)),
+      Boolean(activeProviderAdapterForControlLabel(candidate.label)),
     );
     const skippedUnsupportedControls = providerControls
       .slice(
@@ -1020,7 +1020,7 @@ export async function discoverGoogleOrderingLinks(
           ? providerControls.indexOf(primaryProviderControl)
           : providerControls.length,
       )
-      .filter((candidate) => !majorProviderAdapterForControlLabel(candidate.label))
+      .filter((candidate) => !activeProviderAdapterForControlLabel(candidate.label))
       .map((candidate) => candidate.label);
 
     if (primaryProviderControl) {
@@ -1078,7 +1078,7 @@ export async function discoverGoogleOrderingLinks(
         skippedUnsupportedControls.length > 0
       ) {
         warnings.push(
-          "Google Maps exposed ordering providers, but none matched a major reusable provider adapter.",
+          "Google Maps exposed ordering providers, but no Grubhub delivery source was found.",
         );
       }
       warnings.push(

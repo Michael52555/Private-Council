@@ -13,6 +13,7 @@ type ProviderSchema = {
 };
 
 const COMMON_IGNORED_COLLECTIONS = /modifier|customization|option|choice|add-?on|upsell|recommendation|comboStep/i;
+const GRUBHUB_BEST_SELLER_SECTION = /^(?:best\s*sellers?|most ordered(?: on grubhub)?|popular items?)$/i;
 
 const PROVIDER_SCHEMAS: Record<MenuAdapterId, ProviderSchema> = {
   doordash: {
@@ -190,6 +191,29 @@ function itemFromNode(
   };
 }
 
+function hasBestSellerMarker(node: JsonObject): boolean {
+  for (const [key, value] of Object.entries(node)) {
+    if (!/best.?seller|popular|badge|label|tag/i.test(key)) continue;
+    if (value === true && /best.?seller|popular/i.test(key)) return true;
+    if (typeof value === "string" && /best\s*seller|most ordered/i.test(value)) {
+      return true;
+    }
+    if (
+      Array.isArray(value) &&
+      value.some((entry) =>
+        typeof entry === "string"
+          ? /best\s*seller|most ordered/i.test(entry)
+          : isObject(entry) && /best\s*seller|most ordered/i.test(
+              firstString(entry.name, entry.label, entry.text, entry.title) ?? "",
+            ),
+      )
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
 function walkProviderPayload(
   value: unknown,
   sourceId: string,
@@ -212,7 +236,11 @@ function walkProviderPayload(
   seen.add(value);
 
   if (context.eligibleItem) {
-    const item = itemFromNode(value, sourceId, context.section);
+    const item = itemFromNode(
+      value,
+      sourceId,
+      hasBestSellerMarker(value) ? "Best Sellers" : context.section,
+    );
     if (item) items.push(item);
   }
 
@@ -247,14 +275,39 @@ function extractGrubhubSemanticDom(
   const $ = cheerio.load(html);
   const items: MenuItem[] = [];
   const nonItemHeading = /^(?:menu|delivery|pickup|reviews?|hours|faqs?|best sellers|start group order|see the full schedule)$/i;
+  let insideBestSellers = false;
+  let bestSellerHeadingLevel = 6;
 
-  $("h3, h4, h5, h6, [role='heading']").each((_, element) => {
+  $("h1, h2, h3, h4, h5, h6, [role='heading']").each((_, element) => {
     const name = $(element).text().replace(/\s+/g, " ").trim();
+    const tagMatch = element.type === "tag"
+      ? element.name.match(/^h([1-6])$/i)
+      : null;
+    const headingLevel = Number(
+      $(element).attr("aria-level") ?? tagMatch?.[1] ?? 6,
+    );
+    if (GRUBHUB_BEST_SELLER_SECTION.test(name)) {
+      insideBestSellers = true;
+      bestSellerHeadingLevel = Number.isFinite(headingLevel) ? headingLevel : 6;
+      return;
+    }
+    if (insideBestSellers && headingLevel <= bestSellerHeadingLevel) {
+      insideBestSellers = false;
+    }
     if (!name || name.length > 180 || nonItemHeading.test(name)) return;
 
     let container = $(element);
     let price: number | undefined;
     for (let depth = 0; depth < 6; depth += 1) {
+      // Do not climb from a category heading into a wrapper that contains many
+      // product cards. Otherwise the first descendant price can make headings
+      // such as "Entrées" look like a Best Seller menu item.
+      if (
+        depth > 0 &&
+        container.find("h1, h2, h3, h4, h5, h6, [role='heading']").length > 1
+      ) {
+        break;
+      }
       const text = container.text().replace(/\s+/g, " ");
       const prices = [...text.matchAll(/\$([0-9]+(?:\.[0-9]{2})?)(?:\+)?/g)];
       if (prices.length >= 1 && prices.length <= 2) {
@@ -265,6 +318,12 @@ function extractGrubhubSemanticDom(
       if (container.length === 0) break;
     }
     if (price === undefined || !Number.isFinite(price)) return;
+    const hasBestSellerBadge = container
+      .find("*")
+      .addBack()
+      .toArray()
+      .some((node) => /^best seller$/i.test($(node).text().replace(/\s+/g, " ").trim()));
+    if (!insideBestSellers && !hasBestSellerBadge) return;
     const description = container
       .find("p")
       .first()
@@ -275,6 +334,7 @@ function extractGrubhubSemanticDom(
       id: itemId(source.id, name, undefined, price),
       name,
       ...(description && description !== name ? { description } : {}),
+      section: "Best Sellers",
       price: Math.round(price * 100) / 100,
       currency: "USD",
       sourceId: source.id,
@@ -302,9 +362,12 @@ export function extractProviderMenuFromJson(
     if (items.length >= 750) break;
   }
   const deduped = dedupe(items).slice(0, 750);
+  const scopedItems = adapterId === "grubhub"
+    ? deduped.filter((item) => GRUBHUB_BEST_SELLER_SECTION.test(item.section ?? ""))
+    : deduped;
   return {
-    items: deduped,
-    methods: deduped.length > 0
+    items: scopedItems,
+    methods: scopedItems.length > 0
       ? new Set(["embedded_json"] as const)
       : new Set<"json_ld" | "embedded_json" | "dom">(),
   };

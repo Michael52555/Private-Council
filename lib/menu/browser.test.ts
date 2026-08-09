@@ -39,17 +39,17 @@ test("recognizes the Chinese online-order control but rejects sponsored order ad
   assert.equal(scoreGoogleOrderControlLabel("立即订餐 · 广告主: GrubHub, Inc."), -1);
 });
 
-test("skips an unsupported first provider and selects the next registered adapter", () => {
+test("skips non-Grubhub providers and selects Grubhub", () => {
   const selected = selectFirstSupportedOrderingLink([
     { href: "https://pressed.com/order", text: "Pressed" },
     { href: "https://www.doordash.com/store/pressed-123", text: "DoorDash" },
     { href: "https://www.grubhub.com/restaurant/pressed-123", text: "Grubhub" },
   ]);
 
-  assert.equal(selected?.href, "https://www.doordash.com/store/pressed-123");
+  assert.equal(selected?.href, "https://www.grubhub.com/restaurant/pressed-123");
 });
 
-test("preserves all supported ordering links for runtime fallback", () => {
+test("keeps only Grubhub ordering links", () => {
   const selected = selectSupportedOrderingLinks([
     { href: "https://pressed.com/order", text: "Pressed" },
     { href: "https://www.pandaexpress.com/location", text: "Panda pickup" },
@@ -58,12 +58,11 @@ test("preserves all supported ordering links for runtime fallback", () => {
   ]);
 
   assert.deepEqual(selected.map((candidate) => candidate.text), [
-    "DoorDash delivery",
     "Grubhub delivery",
   ]);
 });
 
-test("skips a chain website and chooses the first major provider in Google order", () => {
+test("skips a chain website and other delivery platforms for Grubhub", () => {
   const selected = selectSupportedOrderingLinks([
     {
       href: "https://order.chick-fil-a.com/load-dot-com?locationNumber=03260",
@@ -77,15 +76,18 @@ test("skips a chain website and chooses the first major provider in Google order
       href: "https://www.ubereats.com/store/chick-fil-a/example",
       text: "Uber Eats delivery",
     },
+    {
+      href: "https://www.grubhub.com/restaurant/chick-fil-a-123",
+      text: "Grubhub delivery",
+    },
   ]);
 
   assert.deepEqual(selected.map((candidate) => candidate.text), [
-    "DoorDash delivery",
-    "Uber Eats delivery",
+    "Grubhub delivery",
   ]);
   assert.equal(
     selectFirstSupportedOrderingLink(selected)?.text,
-    "DoorDash delivery",
+    "Grubhub delivery",
   );
 });
 

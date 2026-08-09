@@ -36,11 +36,13 @@ extraction:
 Candidate generation can return up to twenty restaurants. Cached menu results
 are joined into that initial response in one database query, so known places are
 scored immediately and never enter the scraper queue. Three bounded workers
-inspect only cache misses. Discovery preserves the Google Maps panel's visual
-order but accepts only reusable major-provider integrations such as DoorDash,
-Uber Eats, Grubhub, Toast, Olo, ChowNow, Square, and Clover. Restaurant-owned
-ordering sites are skipped, so the first matching major-provider link becomes
-primary and up to two later matches remain available as runtime fallbacks.
+inspect only cache misses. The current focused pipeline opens the Google Maps
+ordering panel, explicitly activates Delivery/外送, and accepts only a Grubhub
+source. Restaurants without Grubhub remain unresolved for later fallback work.
+For a resolved restaurant, extraction is restricted to Grubhub's **Best
+Sellers** section (or item-level Best Seller badges), preventing full-menu
+sauces, merchandise, modifiers, and unrelated low-price items from distorting
+the representative meal estimate.
 A successful menu can replace the Google fallback with a typical per-person
 meal estimate. The estimator classifies raw menu items into complete meals,
 mains, shared mains, small plates, sides, drinks, desserts, unit-priced items,

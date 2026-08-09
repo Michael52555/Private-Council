@@ -110,7 +110,7 @@ test("applies the provider schema to embedded Taco Bell state", () => {
   assert.equal(result.items[0].price, 1.99);
 });
 
-test("extracts a public Grubhub menu from semantic headings when its JSON API is unavailable", () => {
+test("extracts only the Grubhub Best Sellers section from semantic headings", () => {
   const source = makeOrderingSource({
     url: "https://www.grubhub.com/restaurant/example/123",
     discoveredFrom: "google_maps",
@@ -118,11 +118,14 @@ test("extracts a public Grubhub menu from semantic headings when its JSON API is
   const result = extractProviderMenuFromHtml(`
     <main>
       <section>
-        <h3>Chicken</h3>
-        <article><h6>Hawaiian BBQ Chicken</h6><p>Rice and macaroni salad.</p><span>$22.99</span></article>
-        <article><h6>Chicken Katsu</h6><p>Crispy breaded chicken.</p><span>$21.99</span></article>
-        <article><h6>Teriyaki Chicken</h6><span>$20.99</span></article>
-        <article><h6>Maui Pineapple Chicken</h6><span>$24.99</span></article>
+        <h2>Best Sellers</h2>
+        <p>Most ordered on Grubhub</p>
+        <article><h4>Hawaiian BBQ Chicken</h4><p>Rice and macaroni salad.</p><span>$22.99</span></article>
+        <article><h4>Chicken Katsu</h4><p>Crispy breaded chicken.</p><span>$21.99</span></article>
+        <article><h4>Teriyaki Chicken</h4><span>$20.99</span></article>
+        <article><h4>Maui Pineapple Chicken</h4><span>$24.99</span></article>
+        <h2>Entrées</h2>
+        <article><h4>Entire Menu Item</h4><span>$99.99</span></article>
       </section>
     </main>
   `, source, "grubhub");
@@ -137,4 +140,61 @@ test("extracts a public Grubhub menu from semantic headings when its JSON API is
     ],
   );
   assert(result.methods.has("dom"));
+  assert(result.items.every((item) => item.section === "Best Sellers"));
+});
+
+test("uses a Grubhub Best Seller badge when the featured section is absent", () => {
+  const source = makeOrderingSource({
+    url: "https://www.grubhub.com/restaurant/example/123",
+    discoveredFrom: "google_maps",
+  });
+  const result = extractProviderMenuFromHtml(`
+    <main>
+      <h2>Entrées</h2>
+      <article><h4>Spicy Deluxe Sandwich</h4><span>Best Seller</span><span>$10.25</span></article>
+      <article><h4>Regular Sandwich</h4><span>$8.45</span></article>
+    </main>
+  `, source, "grubhub");
+
+  assert.deepEqual(
+    result.items.map((item) => [item.name, item.price, item.section]),
+    [["Spicy Deluxe Sandwich", 10.25, "Best Sellers"]],
+  );
+});
+
+test("filters Grubhub JSON payloads to Best Sellers", () => {
+  const source = makeOrderingSource({
+    url: "https://www.grubhub.com/restaurant/example/123",
+    discoveredFrom: "google_maps",
+  });
+  const result = extractProviderMenuFromJson([
+    {
+      url: "https://www.grubhub.com/api/menu",
+      status: 200,
+      contentType: "application/json",
+      data: {
+        categories: [
+          {
+            name: "Best Sellers",
+            items: [
+              { name: "Chicken Sandwich", displayPrice: "$8.45" },
+              { name: "Spicy Deluxe Sandwich", displayPrice: "$10.25" },
+            ],
+          },
+          {
+            name: "Sides",
+            items: [{ name: "Waffle Fries", displayPrice: "$4.49" }],
+          },
+        ],
+      },
+    },
+  ], source, "grubhub");
+
+  assert.deepEqual(
+    result.items.map((item) => [item.name, item.price, item.section]),
+    [
+      ["Chicken Sandwich", 8.45, "Best Sellers"],
+      ["Spicy Deluxe Sandwich", 10.25, "Best Sellers"],
+    ],
+  );
 });

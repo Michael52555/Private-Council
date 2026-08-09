@@ -76,9 +76,12 @@ export async function extractMenuFromSource(
     source,
     adapter.id,
   );
-  let extraction = directProviderExtraction.items.length >= 3
+  const providerScopedExtraction = adapter.id === "grubhub";
+  let extraction = providerScopedExtraction
     ? directProviderExtraction
-    : extractMenuFromHtml(html, source);
+    : directProviderExtraction.items.length >= 3
+      ? directProviderExtraction
+      : extractMenuFromHtml(html, source);
 
   if (
     isBrowserConfigured() &&
@@ -99,16 +102,26 @@ export async function extractMenuFromSource(
         source,
         adapter.id,
       );
-      const renderedHtmlExtraction = renderedProviderExtraction.items.length >= 3
+      const renderedHtmlExtraction = providerScopedExtraction
         ? renderedProviderExtraction
-        : extractMenuFromHtml(rendered.html, source);
-      extraction = providerJsonExtraction.items.length >= 3
-        ? providerJsonExtraction
-        : mergeExtractions([
-            extraction,
-            renderedHtmlExtraction,
-            extractMenuFromJsonPayloads(rendered.jsonPayloads, source, adapter.id),
-          ]);
+        : renderedProviderExtraction.items.length >= 3
+          ? renderedProviderExtraction
+          : extractMenuFromHtml(rendered.html, source);
+      if (!providerScopedExtraction) {
+        extraction = providerJsonExtraction.items.length >= 3
+          ? providerJsonExtraction
+          : mergeExtractions([
+              extraction,
+              renderedHtmlExtraction,
+              extractMenuFromJsonPayloads(rendered.jsonPayloads, source, adapter.id),
+            ]);
+      } else {
+        extraction = mergeExtractions([
+          extraction,
+          providerJsonExtraction,
+          renderedHtmlExtraction,
+        ]);
+      }
       if (rendered.diagnostics.navigationStatus && rendered.diagnostics.navigationStatus >= 400) {
         warnings.push(`Browser navigation returned HTTP ${rendered.diagnostics.navigationStatus}.`);
       }

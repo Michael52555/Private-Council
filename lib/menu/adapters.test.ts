@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
-  MAJOR_PROVIDER_ADAPTER_IDS,
-  majorProviderAdapterForControlLabel,
-  majorProviderAdapterForUrl,
+  ACTIVE_PROVIDER_ADAPTER_IDS,
+  activeProviderAdapterForControlLabel,
+  activeProviderAdapterForUrl,
   menuAdapterForControlLabel,
   menuAdapterForUrl,
 } from "@/lib/menu/adapters";
@@ -36,31 +36,26 @@ test("leaves unsupported first-party providers out of the adapter registry", () 
   assert.equal(menuAdapterForControlLabel("pressed.com Merchant website"), undefined);
 });
 
-test("uses an explicit major-provider allowlist for unified discovery", () => {
-  assert.deepEqual(MAJOR_PROVIDER_ADAPTER_IDS, [
-    "doordash",
-    "ubereats",
+test("uses an explicit Grubhub-only allowlist for unified discovery", () => {
+  assert.deepEqual(ACTIVE_PROVIDER_ADAPTER_IDS, ["grubhub"]);
+  assert.equal(
+    activeProviderAdapterForUrl("https://www.grubhub.com/restaurant/example")?.id,
     "grubhub",
-    "toast",
-    "olo",
-    "chownow",
-    "square",
-    "clover",
-  ]);
-  assert.equal(
-    majorProviderAdapterForUrl("https://www.doordash.com/store/example")?.id,
-    "doordash",
   );
   assert.equal(
-    majorProviderAdapterForControlLabel("Order with Toast")?.id,
-    "toast",
+    activeProviderAdapterForControlLabel("Order with Grubhub")?.id,
+    "grubhub",
   );
   assert.equal(
-    majorProviderAdapterForUrl("https://order.chick-fil-a.com/load-dot-com"),
+    activeProviderAdapterForUrl("https://www.doordash.com/store/example"),
     undefined,
   );
   assert.equal(
-    majorProviderAdapterForControlLabel("chick-fil-a.com Merchant website"),
+    activeProviderAdapterForUrl("https://order.chick-fil-a.com/load-dot-com"),
+    undefined,
+  );
+  assert.equal(
+    activeProviderAdapterForControlLabel("chick-fil-a.com Merchant website"),
     undefined,
   );
 });
