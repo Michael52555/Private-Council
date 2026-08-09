@@ -9,6 +9,7 @@ import { estimateMealComposition } from "@/lib/menu/meal-composition";
 type MealEstimateContext = {
   restaurantName?: string;
   mealProfile?: RestaurantMealProfile;
+  restaurantTags?: string[];
   partySize?: number;
 };
 
@@ -67,10 +68,8 @@ export function mealEstimateConfidence(
   summary: RestaurantMenuResult["priceSummary"],
 ): BudgetEstimateConfidence {
   if (summary.sampleItemCount < 2) return "none";
-  if (summary.sampleItemCount < 3) {
-    return summary.basis === "explicit_meals" ? "medium" : "none";
-  }
   if (summary.confidence) return summary.confidence;
+  if (summary.sampleItemCount < 3) return "medium";
   if (summary.basis === "explicit_meals") return "high";
   if (summary.basis === "filtered_menu_items") return "medium";
   return "none";

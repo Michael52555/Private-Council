@@ -34,7 +34,7 @@ test("prefers explicit fast-food combos over sauces, drinks, and sides", () => {
   assert.equal(mealEstimateConfidence(summary), "high");
 });
 
-test("recognizes entree-like names as single-person mains", () => {
+test("recognizes entree-like names as one-main baskets without adding a side", () => {
   const summary = summarizeTypicalMealPrices([
     item("a", "Orange Chicken", 9),
     item("b", "Kung Pao Chicken", 11),
@@ -42,16 +42,16 @@ test("recognizes entree-like names as single-person mains", () => {
     item("d", "Side of Rice", 3, "Sides"),
   ]);
 
-  assert.equal(summary.basis, "composed_basket");
-  assert.equal(summary.sampleItemCount, 4);
-  assert.equal(summary.lowerQuartile, 12);
-  assert.equal(summary.median, 14);
-  assert.equal(summary.upperQuartile, 16);
-  assert.equal(summary.mealPattern, "main_plus_sides");
+  assert.equal(summary.basis, "filtered_menu_items");
+  assert.equal(summary.sampleItemCount, 3);
+  assert.equal(summary.lowerQuartile, 9);
+  assert.equal(summary.median, 11);
+  assert.equal(summary.upperQuartile, 13);
+  assert.equal(summary.mealPattern, "single_main");
   assert.equal(mealEstimateConfidence(summary), "medium");
 });
 
-test("composes one sit-down main, one side, and one drink", () => {
+test("does not automatically add optional sides and drinks to a main", () => {
   const summary = summarizeTypicalMealPrices(
     [
       item("brisket", "Smoked Brisket", 18, "Mains"),
@@ -67,15 +67,15 @@ test("composes one sit-down main, one side, and one drink", () => {
     { restaurantName: "Smoke Shop BBQ", mealProfile: "sit_down" },
   );
 
-  assert.equal(summary.basis, "composed_basket");
-  assert.equal(summary.mealPattern, "main_plus_sides");
-  assert.equal(summary.lowerQuartile, 21);
-  assert.equal(summary.median, 30);
-  assert.equal(summary.upperQuartile, 35);
-  assert.equal(mealEstimateConfidence(summary), "medium");
+  assert.equal(summary.basis, "filtered_menu_items");
+  assert.equal(summary.mealPattern, "single_main");
+  assert.equal(summary.lowerQuartile, 14);
+  assert.equal(summary.median, 20);
+  assert.equal(summary.upperQuartile, 22);
+  assert.equal(mealEstimateConfidence(summary), "high");
 });
 
-test("does not invent a price for unsupported sit-down small plates", () => {
+test("estimates a 2-3 item basket for tapas and other small plates", () => {
   const summary = summarizeTypicalMealPrices(
     [
       item("olives", "Marinated Olives", 7, "Tapas"),
@@ -86,9 +86,12 @@ test("does not invent a price for unsupported sit-down small plates", () => {
     { restaurantName: "Barcelona Tapas", mealProfile: "sit_down" },
   );
 
-  assert.equal(summary.basis, "none");
-  assert.equal(summary.median, null);
-  assert.equal(hasReliableMealEstimate(summary), false);
+  assert.equal(summary.basis, "composed_basket");
+  assert.equal(summary.mealPattern, "multiple_small_plates");
+  assert.equal(summary.lowerQuartile, 14);
+  assert.equal(summary.median, 25);
+  assert.equal(summary.upperQuartile, 33);
+  assert.equal(hasReliableMealEstimate(summary), true);
 });
 
 test("uses main-entry prices for a sit-down restaurant without sides or drinks", () => {
@@ -109,7 +112,7 @@ test("uses main-entry prices for a sit-down restaurant without sides or drinks",
   assert.equal(mealEstimateConfidence(summary), "high");
 });
 
-test("builds a fast-food meal from mains, a side, and a drink", () => {
+test("uses one fast-food main when no explicit combo is present", () => {
   const summary = summarizeTypicalMealPrices(
     [
       item("spicy", "Spicy Deluxe Sandwich", 10.25),
@@ -121,12 +124,12 @@ test("builds a fast-food meal from mains, a side, and a drink", () => {
     { restaurantName: "Chick-fil-A", mealProfile: "fast_food" },
   );
 
-  assert.equal(summary.mealPattern, "main_plus_sides");
-  assert.equal(summary.lowerQuartile, 15.94);
-  assert.equal(summary.median, 16.84);
-  assert.equal(summary.upperQuartile, 17.74);
-  assert.equal(summary.sampleItemCount, 4);
-  assert.equal(mealEstimateConfidence(summary), "medium");
+  assert.equal(summary.mealPattern, "single_main");
+  assert.equal(summary.lowerQuartile, 8.45);
+  assert.equal(summary.median, 8.55);
+  assert.equal(summary.upperQuartile, 10.25);
+  assert.equal(summary.sampleItemCount, 3);
+  assert.equal(mealEstimateConfidence(summary), "high");
 });
 
 test("uses branded Grubhub Best Sellers as fast-food mains", () => {
@@ -163,7 +166,7 @@ test("does not estimate a meal from fewer than three unknown featured products",
   assert.equal(summary.median, null);
 });
 
-test("does not mistake individual Taco Bell tacos for a complete meal", () => {
+test("estimates two to three individual tacos per person", () => {
   const summary = summarizeTypicalMealPrices(
     [
       item("taco-1", "Cheesy Toasted Taco", 1.99),
@@ -174,9 +177,12 @@ test("does not mistake individual Taco Bell tacos for a complete meal", () => {
     { restaurantName: "Taco Bell", mealProfile: "fast_food" },
   );
 
-  assert.equal(summary.basis, "none");
-  assert.equal(summary.median, null);
-  assert.equal(hasReliableMealEstimate(summary), false);
+  assert.equal(summary.basis, "composed_basket");
+  assert.equal(summary.mealPattern, "multiple_small_plates");
+  assert.equal(summary.lowerQuartile, 3.98);
+  assert.equal(summary.median, 6.23);
+  assert.equal(summary.upperQuartile, 8.07);
+  assert.equal(hasReliableMealEstimate(summary), true);
 });
 
 test("accepts full fast-food bowls and burritos without adding unrelated items", () => {
@@ -191,14 +197,14 @@ test("accepts full fast-food bowls and burritos without adding unrelated items",
     { restaurantName: "Chipotle Mexican Grill", mealProfile: "fast_food" },
   );
 
-  assert.equal(summary.mealPattern, "main_plus_sides");
-  assert.equal(summary.lowerQuartile, 14);
-  assert.equal(summary.median, 15);
-  assert.equal(summary.upperQuartile, 15.25);
-  assert.equal(summary.sampleItemCount, 5);
+  assert.equal(summary.mealPattern, "single_main");
+  assert.equal(summary.lowerQuartile, 11.5);
+  assert.equal(summary.median, 12.5);
+  assert.equal(summary.upperQuartile, 12.75);
+  assert.equal(summary.sampleItemCount, 4);
 });
 
-test("rejects unit-priced sushi pieces as a per-person meal estimate", () => {
+test("estimates four to six pieces for nigiri-dominant menus", () => {
   const summary = summarizeTypicalMealPrices(
     [
       item("salmon", "Salmon Nigiri", 3, "Nigiri"),
@@ -210,11 +216,45 @@ test("rejects unit-priced sushi pieces as a per-person meal estimate", () => {
     { restaurantName: "Kiyo Sushi & Sake" },
   );
 
-  assert.equal(summary.basis, "none");
-  assert.equal(summary.sampleItemCount, 0);
-  assert.equal(summary.median, null);
-  assert.equal(summary.excludedItemCount, 5);
-  assert.equal(hasReliableMealEstimate(summary), false);
+  assert.equal(summary.basis, "composed_basket");
+  assert.equal(summary.mealPattern, "unit_items");
+  assert.equal(summary.sampleItemCount, 5);
+  assert.equal(summary.lowerQuartile, 14);
+  assert.equal(summary.median, 20);
+  assert.equal(summary.upperQuartile, 39);
+  assert.equal(hasReliableMealEstimate(summary), true);
+});
+
+test("uses Grubhub bowl tags to recognize branded Best Sellers and exclude smoothies", () => {
+  const summary = summarizeTypicalMealPrices(
+    [
+      item("lazy-blue", "The Lazy Blue", 14.88, "Best Sellers"),
+      item("custom-bowl", "The Custom Bowl", 14.88, "Best Sellers"),
+      item("acai", "Layered Smoothie - Acai", 12.06, "Best Sellers"),
+      item("pitaya", "Layered Smoothie - Pitaya", 12.06, "Best Sellers"),
+      item("berry", "Layered Smoothie - Huckleberry", 12.06, "Best Sellers"),
+    ],
+    { restaurantTags: ["Bowls", "Dinner", "Healthy"] },
+  );
+
+  assert.equal(summary.mealPattern, "single_main");
+  assert.equal(summary.sampleItemCount, 2);
+  assert.equal(summary.median, 14.88);
+  assert.equal(summary.excludedItemCount, 3);
+  assert.equal(mealEstimateConfidence(summary), "medium");
+});
+
+test("divides explicitly shared family meals by their serving count", () => {
+  const summary = summarizeTypicalMealPrices([
+    item("family-1", "Family Meal serves 4", 40, "Family Meals"),
+    item("family-2", "Chicken Feast feeds 4", 60, "Family Meals"),
+  ]);
+
+  assert.equal(summary.mealPattern, "shared_dishes");
+  assert.equal(summary.lowerQuartile, 10);
+  assert.equal(summary.median, 12.5);
+  assert.equal(summary.upperQuartile, 15);
+  assert.equal(mealEstimateConfidence(summary), "high");
 });
 
 test("accepts complete meals from a sushi restaurant", () => {

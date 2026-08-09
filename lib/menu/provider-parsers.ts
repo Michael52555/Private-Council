@@ -15,6 +15,7 @@ type ProviderSchema = {
 const COMMON_IGNORED_COLLECTIONS = /modifier|customization|option|choice|add-?on|upsell|recommendation|comboStep/i;
 const GRUBHUB_BEST_SELLER_SECTION = /^(?:best\s*sellers?|most ordered(?: on grubhub)?|popular items?)$/i;
 const PRICE_ONLY_MENU_TEXT = /^(?:from\s*)?\$\s*[0-9]+(?:\.[0-9]{1,2})?\+?$/i;
+const GRUBHUB_RESTAURANT_TAG_KEYS = /^(?:cuisines?|restaurantCuisines?|restaurant_cuisines?|restaurantTags?|restaurant_tags?|foodTypes?|food_types?)$/i;
 
 const PROVIDER_SCHEMAS: Record<MenuAdapterId, ProviderSchema> = {
   doordash: {
@@ -274,6 +275,73 @@ function dedupe(items: MenuItem[]): MenuItem[] {
   return [...byIdentity.values()];
 }
 
+function normalizeRestaurantTag(value: string): string | undefined {
+  const normalized = value.replace(/\s+/g, " ").trim();
+  if (normalized.length < 2 || normalized.length > 50) return undefined;
+  if (/\$|https?:|ratings?|reviews?|delivery|pickup|miles?/i.test(normalized)) {
+    return undefined;
+  }
+  return normalized;
+}
+
+function restaurantTagsFromValue(value: unknown): string[] {
+  const values = Array.isArray(value) ? value : [value];
+  const tags: string[] = [];
+  for (const entry of values) {
+    const raw = typeof entry === "string"
+      ? entry
+      : isObject(entry)
+        ? firstString(entry.name, entry.label, entry.displayName, entry.title)
+        : undefined;
+    if (!raw) continue;
+    for (const part of raw.split(/[,|]/)) {
+      const tag = normalizeRestaurantTag(part);
+      if (tag) tags.push(tag);
+    }
+  }
+  return tags;
+}
+
+function extractGrubhubRestaurantTagsFromJson(value: unknown): string[] {
+  const tags = new Set<string>();
+  const seen = new WeakSet<object>();
+  const visit = (current: unknown, depth: number): void => {
+    if (depth > 20 || tags.size >= 20) return;
+    if (Array.isArray(current)) {
+      current.forEach((entry) => visit(entry, depth + 1));
+      return;
+    }
+    if (!isObject(current) || seen.has(current)) return;
+    seen.add(current);
+    for (const [key, child] of Object.entries(current)) {
+      if (GRUBHUB_RESTAURANT_TAG_KEYS.test(key)) {
+        restaurantTagsFromValue(child).forEach((tag) => tags.add(tag));
+      }
+      visit(child, depth + 1);
+    }
+  };
+  visit(value, 0);
+  return [...tags];
+}
+
+function extractGrubhubRestaurantTagsFromDom(html: string): string[] {
+  const $ = cheerio.load(html);
+  const tags = new Set<string>();
+  $("body *").each((_, element) => {
+    if (tags.size >= 20) return false;
+    const ownText = $(element)
+      .contents()
+      .filter((__, node) => node.type === "text")
+      .text()
+      .replace(/\s+/g, " ")
+      .trim();
+    const match = ownText.match(/^(.{2,180}?)\s*(?:·|•)\s*\${1,4}$/);
+    if (!match || !match[1].includes(",")) return;
+    restaurantTagsFromValue(match[1]).forEach((tag) => tags.add(tag));
+  });
+  return [...tags];
+}
+
 function extractGrubhubSemanticDom(
   html: string,
   source: OrderingSource,
@@ -410,8 +478,14 @@ export function extractProviderMenuFromJson(
   adapterId: MenuAdapterId,
 ): HtmlMenuExtraction {
   const items: MenuItem[] = [];
+  const restaurantTags = new Set<string>();
   const schema = PROVIDER_SCHEMAS[adapterId];
   for (const payload of payloads) {
+    if (adapterId === "grubhub") {
+      extractGrubhubRestaurantTagsFromJson(payload.data).forEach((tag) =>
+        restaurantTags.add(tag),
+      );
+    }
     walkProviderPayload(
       payload.data,
       source.id,
@@ -428,6 +502,7 @@ export function extractProviderMenuFromJson(
     : deduped;
   return {
     items: scopedItems,
+    restaurantTags: [...restaurantTags],
     methods: scopedItems.length > 0
       ? new Set(["embedded_json"] as const)
       : new Set<"json_ld" | "embedded_json" | "dom">(),
@@ -465,9 +540,16 @@ export function extractProviderMenuFromHtml(
   const semanticItems = adapterId === "grubhub"
     ? extractGrubhubSemanticDom(html, source)
     : [];
+  const restaurantTags = adapterId === "grubhub"
+    ? [...new Set([
+        ...(embedded.restaurantTags ?? []),
+        ...extractGrubhubRestaurantTagsFromDom(html),
+      ])]
+    : [];
   const items = dedupe([...embedded.items, ...semanticItems]).slice(0, 750);
   return {
     items,
+    restaurantTags,
     methods: new Set([
       ...(embedded.items.length > 0 ? (["embedded_json"] as const) : []),
       ...(semanticItems.length > 0 ? (["dom"] as const) : []),
