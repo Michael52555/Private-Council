@@ -91,14 +91,17 @@ test("keeps the restaurant score pending before menu prices load", () => {
   ]);
 });
 
-test("does not score a Google fallback until menu enrichment finishes", () => {
+test("keeps Google pricing inactive until menu enrichment finishes", () => {
   const score = evaluateRestaurantScore(
     candidate({
-      estimatedPriceMin: 10,
-      estimatedPriceMax: 20,
-      budgetEstimateSource: "google_price_range",
-      budgetEstimateConfidence: "medium",
-      budgetEstimateCurrency: "USD",
+      googleEstimatedPriceMin: 10,
+      googleEstimatedPriceMax: 20,
+      googleEstimatedPriceMidpoint: 15,
+      googleBudgetEstimateSource: "google_price_range",
+      googleBudgetEstimateConfidence: "medium",
+      googleBudgetEstimateCurrency: "USD",
+      budgetEstimateSource: "unavailable",
+      budgetEstimateConfidence: "none",
       menuStatus: "loading",
     }),
     preferences,
@@ -126,6 +129,46 @@ test("scores the budget only after menu-derived prices load", () => {
 
   assertClose(score.breakdown[1].score, 0.95);
   assertClose(score.totalScore, 0.975);
+});
+
+test("never lets a conflicting Google range override a reliable menu estimate", () => {
+  const menuFirstPreferences = preferences.map((preference) =>
+    preference.category === "budget"
+      ? {
+          ...preference,
+          interpretation: {
+            ...preference.interpretation!,
+            structuredData: {
+              minPriceDollarsPerPerson: 5,
+              maxPriceDollarsPerPerson: 10,
+            },
+          },
+        }
+      : preference,
+  );
+  const score = evaluateRestaurantScore(
+    candidate({
+      estimatedPriceMin: 5,
+      estimatedPriceMax: 8,
+      pricePerPerson: 6.5,
+      budgetEstimateSource: "menu",
+      budgetEstimateConfidence: "high",
+      budgetEstimateCurrency: "USD",
+      googleEstimatedPriceMin: 20,
+      googleEstimatedPriceMax: 50,
+      googleEstimatedPriceMidpoint: 35,
+      googleBudgetEstimateSource: "google_price_range",
+      googleBudgetEstimateConfidence: "medium",
+      googleBudgetEstimateCurrency: "USD",
+      menuStatus: "loaded",
+      menuItemCount: 4,
+    }),
+    menuFirstPreferences,
+  );
+
+  assert.equal(score.breakdown[1].score, 1);
+  assert.equal(score.breakdown[1].status, "ready");
+  assert.equal(score.totalScore, 1);
 });
 
 test("reduces the influence of a low-confidence composed menu estimate", () => {

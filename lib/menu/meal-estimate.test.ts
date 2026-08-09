@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   hasReliableMealEstimate,
-  isMenuEstimatePlausibleAgainstGoogle,
   mealEstimateConfidence,
   summarizeTypicalMealPrices,
 } from "@/lib/menu/meal-estimate";
@@ -144,15 +143,4 @@ test("accepts complete meals from a sushi restaurant", () => {
   assert.equal(summary.upperQuartile, 30);
   assert.equal(summary.median, 24);
   assert.equal(mealEstimateConfidence(summary), "high");
-});
-
-test("rejects menu estimates that are implausibly below a Google range", () => {
-  const summary = summarizeTypicalMealPrices([
-    item("a", "Chicken Sandwich", 5),
-    item("b", "Fish Sandwich", 6),
-    item("c", "Steak Sandwich", 8),
-  ]);
-
-  assert.equal(isMenuEstimatePlausibleAgainstGoogle(summary, 20, 50), false);
-  assert.equal(isMenuEstimatePlausibleAgainstGoogle(summary, 5, 15), true);
 });

@@ -6,7 +6,6 @@ import {
 import { readSuccessfulMenuCacheBatch } from "@/lib/menu/database-cache";
 import {
   hasReliableMealEstimate,
-  isMenuEstimatePlausibleAgainstGoogle,
   mealEstimateConfidence,
 } from "@/lib/menu/meal-estimate";
 import type { RestaurantCandidate } from "@/lib/planning-types";
@@ -173,18 +172,20 @@ async function searchNearbyRestaurants(
         latitude,
         longitude,
       ),
-      pricePerPerson: googleBudget.midpoint,
-      estimatedPriceMin: googleBudget.minimum,
-      estimatedPriceMax: googleBudget.maximum,
+      // Google pricing is retained only as a final fallback. It must not be
+      // promoted to the active estimate before menu enrichment has finished.
+      pricePerPerson: null,
+      estimatedPriceMin: null,
+      estimatedPriceMax: null,
       googleEstimatedPriceMin: googleBudget.minimum,
       googleEstimatedPriceMax: googleBudget.maximum,
       googleEstimatedPriceMidpoint: googleBudget.midpoint,
       googleBudgetEstimateSource: googleBudget.source,
       googleBudgetEstimateConfidence: googleBudget.confidence,
       googleBudgetEstimateCurrency: googleBudget.currency,
-      budgetEstimateSource: googleBudget.source,
-      budgetEstimateConfidence: googleBudget.confidence,
-      budgetEstimateCurrency: googleBudget.currency,
+      budgetEstimateSource: "unavailable",
+      budgetEstimateConfidence: "none",
+      budgetEstimateCurrency: null,
       menuStatus: "pending",
       menuItemCount: 0,
       priceLevel: place.priceLevel,
@@ -243,19 +244,11 @@ export async function POST(request: Request) {
     const hydratedCandidates = candidates.map((candidate) => {
       const cachedMenu = cachedMenus.get(candidate.id)?.result;
       if (!cachedMenu) return candidate;
-      const usableMenuEstimate =
-        hasReliableMealEstimate(cachedMenu.priceSummary) &&
-        isMenuEstimatePlausibleAgainstGoogle(
-          cachedMenu.priceSummary,
-          candidate.googleEstimatedPriceMin,
-          candidate.googleEstimatedPriceMax,
-        );
+      const usableMenuEstimate = hasReliableMealEstimate(cachedMenu.priceSummary);
       if (!usableMenuEstimate) {
-        return {
-          ...candidate,
-          menuStatus: "loaded" as const,
-          menuItemCount: cachedMenu.items.length,
-        };
+        // An old raw-menu result without a usable meal estimate is not a hit.
+        // Keep this candidate pending so the Grubhub-first pipeline can retry.
+        return candidate;
       }
       return {
         ...candidate,
@@ -271,13 +264,16 @@ export async function POST(request: Request) {
         menuItemCount: cachedMenu.items.length,
       };
     });
+    const hydratedMenuCount = hydratedCandidates.filter(
+      (candidate) => candidate.menuStatus === "loaded" && candidate.budgetEstimateSource === "menu",
+    ).length;
     return NextResponse.json({
       candidates: hydratedCandidates,
       meta: {
         originResolved: true,
         formattedOrigin: geocodedOrigin.formattedAddress,
-        cachedMenuCount: cachedMenus.size,
-        menuEnrichmentRequired: cachedMenus.size < candidates.length,
+        cachedMenuCount: hydratedMenuCount,
+        menuEnrichmentRequired: hydratedMenuCount < candidates.length,
       },
     });
   } catch (error) {

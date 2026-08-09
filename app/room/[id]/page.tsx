@@ -23,7 +23,6 @@ import {
 } from "@/lib/menu/survey";
 import {
   hasReliableMealEstimate,
-  isMenuEstimatePlausibleAgainstGoogle,
   mealEstimateConfidence,
 } from "@/lib/menu/meal-estimate";
 
@@ -544,6 +543,22 @@ function OrderingSourcesPanel({ state }: { state: CandidateOrderingState }) {
   );
 }
 
+function activateGoogleBudgetFallback(
+  candidate: RestaurantCandidate,
+  menuStatus: "loaded" | "unavailable",
+): RestaurantCandidate {
+  return {
+    ...candidate,
+    estimatedPriceMin: candidate.googleEstimatedPriceMin,
+    estimatedPriceMax: candidate.googleEstimatedPriceMax,
+    pricePerPerson: candidate.googleEstimatedPriceMidpoint,
+    budgetEstimateSource: candidate.googleBudgetEstimateSource,
+    budgetEstimateConfidence: candidate.googleBudgetEstimateConfidence,
+    budgetEstimateCurrency: candidate.googleBudgetEstimateCurrency,
+    menuStatus,
+  };
+}
+
 function BudgetEstimatePanel({ candidate }: { candidate: RestaurantCandidate }) {
   const isQueuedForMenu = candidate.menuStatus === "pending";
   const isCheckingMenu = candidate.menuStatus === "loading";
@@ -556,9 +571,9 @@ function BudgetEstimatePanel({ candidate }: { candidate: RestaurantCandidate }) 
       ? "Menu-derived typical meal price"
       : "Menu-derived typical meal range"
     : candidate.budgetEstimateSource === "google_price_range"
-      ? "Google price range"
+      ? "Fallback: Google price range"
       : candidate.budgetEstimateSource === "google_price_level"
-        ? "Google price-level estimate"
+        ? "Fallback: Google price-level estimate"
         : "Budget estimate unavailable";
   const confidenceLabel = candidate.budgetEstimateConfidence === "none"
     ? null
@@ -577,7 +592,7 @@ function BudgetEstimatePanel({ candidate }: { candidate: RestaurantCandidate }) 
         <p className="mt-2 text-[10px] leading-4 text-gray-500">
           {isQueuedForMenu
             ? "Waiting for a central scraper worker; cached restaurants bypass this queue."
-            : "A Google estimate will appear only if reliable menu prices cannot be extracted."}
+            : "Google pricing is considered only after Grubhub Best Sellers extraction fails."}
         </p>
       </div>
     );
@@ -601,12 +616,12 @@ function BudgetEstimatePanel({ candidate }: { candidate: RestaurantCandidate }) 
         </p>
       ) : (
         <p className="mt-2 leading-5 text-amber-200/80">
-          No numeric menu or Google price estimate is available, so budget scoring remains pending.
+          No numeric Grubhub menu or final Google fallback is available, so budget scoring remains pending.
         </p>
       )}
       {candidate.budgetEstimateSource === "google_price_level" && (
         <p className="mt-2 text-[10px] leading-4 text-gray-500">
-          Broad heuristic band derived from Google&apos;s price level; exact menu prices can replace it later.
+          Grubhub did not produce a reliable estimate; this broad Google band is the final fallback.
         </p>
       )}
     </div>
@@ -631,7 +646,7 @@ async function fetchWithTimeout(
     });
   } catch (error) {
     if (error instanceof DOMException && error.name === "AbortError") {
-      throw new Error("The menu check timed out. A cached or Google price estimate will be used when available.");
+      throw new Error("The Grubhub menu check timed out. Google pricing will be used only as the final fallback.");
     }
     throw error;
   } finally {
@@ -997,18 +1012,18 @@ export default function RoomPage() {
       }));
 
       setCandidates((current) =>
-        current.map((entry) =>
-          entry.id === candidate.id
-            ? {
-                ...entry,
-                menuStatus: discovery.sources.length > 0
-                  ? "loading"
-                  : "unavailable",
-                menuItemCount: 0,
-                orderingSources: discovery.sources,
-              }
-            : entry,
-        ),
+        current.map((entry) => {
+          if (entry.id !== candidate.id) return entry;
+          const discoveredCandidate: RestaurantCandidate = {
+            ...entry,
+            menuStatus: "loading",
+            menuItemCount: 0,
+            orderingSources: discovery.sources,
+          };
+          return discovery.sources.length > 0
+            ? discoveredCandidate
+            : activateGoogleBudgetFallback(discoveredCandidate, "unavailable");
+        }),
       );
 
       if (discovery.sources.length > 0) {
@@ -1037,10 +1052,7 @@ export default function RoomPage() {
       setCandidates((current) =>
         current.map((entry) =>
           entry.id === candidate.id
-            ? {
-                ...entry,
-                menuStatus: "unavailable",
-              }
+            ? activateGoogleBudgetFallback(entry, "unavailable")
             : entry,
         ),
       );
@@ -1148,33 +1160,23 @@ export default function RoomPage() {
       setCandidates((current) =>
         current.map((entry) => {
           if (entry.id !== candidate.id) return entry;
-          const hasReliablePriceSample =
-            hasReliableMealEstimate(data.priceSummary) &&
-            isMenuEstimatePlausibleAgainstGoogle(
-              data.priceSummary,
-              entry.googleEstimatedPriceMin,
-              entry.googleEstimatedPriceMax,
+          const hasReliablePriceSample = hasReliableMealEstimate(data.priceSummary);
+          if (!hasReliablePriceSample) {
+            return activateGoogleBudgetFallback(
+              { ...entry, menuItemCount: data.items.length },
+              "loaded",
             );
+          }
           return {
             ...entry,
-            estimatedPriceMin: hasReliablePriceSample
-              ? data.priceSummary.lowerQuartile ?? data.priceSummary.minimum
-              : entry.googleEstimatedPriceMin,
-            estimatedPriceMax: hasReliablePriceSample
-              ? data.priceSummary.upperQuartile ?? data.priceSummary.maximum
-              : entry.googleEstimatedPriceMax,
-            pricePerPerson: hasReliablePriceSample
-              ? data.priceSummary.median
-              : entry.googleEstimatedPriceMidpoint,
-            budgetEstimateSource: hasReliablePriceSample
-              ? "menu"
-              : entry.googleBudgetEstimateSource,
-            budgetEstimateConfidence: hasReliablePriceSample
-              ? mealEstimateConfidence(data.priceSummary)
-              : entry.googleBudgetEstimateConfidence,
-            budgetEstimateCurrency: hasReliablePriceSample
-              ? data.priceSummary.currency ?? "USD"
-              : entry.googleBudgetEstimateCurrency,
+            estimatedPriceMin:
+              data.priceSummary.lowerQuartile ?? data.priceSummary.minimum,
+            estimatedPriceMax:
+              data.priceSummary.upperQuartile ?? data.priceSummary.maximum,
+            pricePerPerson: data.priceSummary.median,
+            budgetEstimateSource: "menu",
+            budgetEstimateConfidence: mealEstimateConfidence(data.priceSummary),
+            budgetEstimateCurrency: data.priceSummary.currency ?? "USD",
             menuStatus: "loaded",
             menuItemCount: data.items.length,
           };
@@ -1184,7 +1186,7 @@ export default function RoomPage() {
       setCandidates((current) =>
         current.map((entry) =>
           entry.id === candidate.id
-            ? { ...entry, menuStatus: "loaded" }
+            ? activateGoogleBudgetFallback(entry, "loaded")
             : entry,
         ),
       );

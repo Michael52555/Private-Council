@@ -73,30 +73,3 @@ export function hasReliableMealEstimate(
 ): boolean {
   return mealEstimateConfidence(summary) !== "none";
 }
-
-export function isMenuEstimatePlausibleAgainstGoogle(
-  summary: RestaurantMenuResult["priceSummary"],
-  googleMinimum: number | null,
-  googleMaximum: number | null,
-): boolean {
-  if (!hasReliableMealEstimate(summary)) return false;
-  const menuLower = summary.lowerQuartile ?? summary.minimum;
-  const menuUpper = summary.upperQuartile ?? summary.maximum;
-  if (typeof menuLower !== "number" || typeof menuUpper !== "number") return false;
-
-  if (
-    typeof googleMinimum === "number" &&
-    googleMinimum > 0 &&
-    menuUpper < googleMinimum * 0.6
-  ) {
-    return false;
-  }
-  if (
-    typeof googleMaximum === "number" &&
-    googleMaximum > 0 &&
-    menuLower > googleMaximum * 1.75
-  ) {
-    return false;
-  }
-  return true;
-}
