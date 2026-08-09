@@ -2,9 +2,11 @@ import assert from "node:assert/strict";
 import { mkdtempSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 import type { OrderingSource, RestaurantMenuResult } from "@/lib/menu/types";
 import {
+  mealEstimatorVersion,
   menuSourceFingerprint,
   menuFailureRetryDelayMs,
   isTransientProviderFailureReason,
@@ -14,10 +16,11 @@ import {
   storeMenuSuccessOnce,
 } from "@/lib/menu/database-cache";
 
-process.env.RESTAURANT_CACHE_DB_PATH = join(
+const cachePath = join(
   mkdtempSync(join(tmpdir(), "private-council-cache-test-")),
   "cache.sqlite",
 );
+process.env.RESTAURANT_CACHE_DB_PATH = cachePath;
 
 function source(url: string, provider: OrderingSource["provider"]): OrderingSource {
   return {
@@ -27,6 +30,34 @@ function source(url: string, provider: OrderingSource["provider"]): OrderingSour
     url,
     fulfillment: "pickup",
     discoveredFrom: "google_maps",
+  };
+}
+
+function bowlResult(placeId: string, prices: number[]): RestaurantMenuResult {
+  return {
+    placeId,
+    restaurantName: "Legacy Bowl Test",
+    menus: [],
+    items: prices.map((price, index) => ({
+      id: `${placeId}-bowl-${index}`,
+      name: `Chicken Bowl ${index + 1}`,
+      section: "Bowls",
+      price,
+      currency: "USD",
+      sourceId: "legacy-source",
+    })),
+    priceSummary: {
+      minimum: prices[0] ?? null,
+      maximum: prices.at(-1) ?? null,
+      lowerQuartile: prices[0] ?? null,
+      upperQuartile: prices.at(-1) ?? null,
+      median: prices[Math.floor(prices.length / 2)] ?? null,
+      currency: "USD",
+      basis: "filtered_menu_items",
+      sampleItemCount: prices.length,
+      excludedItemCount: 0,
+      sampleItemIds: [],
+    },
   };
 }
 
@@ -169,4 +200,80 @@ test("recomputes cached unit-item menus with the current basket estimator", () =
     assert.equal(cached.result.priceSummary.median, 18.75);
   }
   assert.equal(readSuccessfulMenuCacheBatch(["place-kiyo"]).size, 1);
+});
+
+test("migrates an older successful raw menu before honoring a newer failure", () => {
+  // Initialize the schema, then emulate the exact regression: v3 succeeded,
+  // while a v4 cold scrape produced a negative cache entry.
+  readMenuCache("schema-initializer");
+  const legacyResult = bowlResult("place-legacy-success", [12, 14, 16]);
+  const db = new DatabaseSync(cachePath);
+  const now = new Date();
+  db.prepare(`
+    INSERT INTO restaurant_menu_cache (
+      place_id, schema_version, status, source_fingerprint,
+      result_json, failure_reason, stored_at, retry_after
+    ) VALUES (?, 3, 'success', ?, ?, NULL, ?, NULL)
+  `).run(
+    "place-legacy-success",
+    "attempt-v8|grubhub:grubhub.com",
+    JSON.stringify(legacyResult),
+    now.toISOString(),
+  );
+  db.prepare(`
+    INSERT INTO restaurant_menu_cache (
+      place_id, schema_version, status, source_fingerprint,
+      result_json, failure_reason, stored_at, retry_after
+    ) VALUES (?, 4, 'failure', ?, NULL, ?, ?, ?)
+  `).run(
+    "place-legacy-success",
+    "attempt-v9|grubhub:grubhub.com",
+    "Grubhub temporarily rate-limited menu extraction (HTTP 429).",
+    now.toISOString(),
+    new Date(now.getTime() + 5 * 60 * 1000).toISOString(),
+  );
+  db.close();
+
+  const grubhub = source("https://grubhub.com/restaurant/legacy", "grubhub");
+  const cached = readMenuCache("place-legacy-success", [grubhub]);
+  assert.equal(cached.status, "success");
+  if (cached.status === "success") {
+    assert.equal(cached.result.priceSummary.median, 14);
+  }
+
+  const verificationDb = new DatabaseSync(cachePath);
+  const rawRow = verificationDb.prepare(`
+    SELECT raw_schema_version FROM restaurant_raw_menu_cache WHERE place_id = ?
+  `).get("place-legacy-success") as Record<string, unknown> | undefined;
+  const estimateRow = verificationDb.prepare(`
+    SELECT estimator_version FROM restaurant_meal_estimate_cache WHERE place_id = ?
+  `).get("place-legacy-success") as Record<string, unknown> | undefined;
+  verificationDb.close();
+  assert.equal(rawRow?.raw_schema_version, 1);
+  assert.equal(estimateRow?.estimator_version, mealEstimatorVersion);
+  assert.equal(readSuccessfulMenuCacheBatch(["place-legacy-success"]).size, 1);
+});
+
+test("keeps priced raw facts even before they yield a reliable estimate", () => {
+  const grubhub = source("https://grubhub.com/restaurant/future", "grubhub");
+  storeMenuSuccessOnce(
+    "place-future-estimator",
+    [grubhub],
+    bowlResult("place-future-estimator", [13]),
+  );
+  assert.equal(readMenuCache("place-future-estimator", [grubhub]).status, "miss");
+
+  const db = new DatabaseSync(cachePath);
+  const rawRow = db.prepare(`
+    SELECT result_json FROM restaurant_raw_menu_cache WHERE place_id = ?
+  `).get("place-future-estimator") as Record<string, unknown> | undefined;
+  db.close();
+  assert.ok(rawRow?.result_json);
+
+  storeMenuSuccessOnce(
+    "place-future-estimator",
+    [grubhub],
+    bowlResult("place-future-estimator", [13, 15, 17]),
+  );
+  assert.equal(readMenuCache("place-future-estimator", [grubhub]).status, "success");
 });

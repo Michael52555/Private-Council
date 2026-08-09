@@ -129,13 +129,20 @@ export async function POST(request: Request) {
         }
         throw error;
       }
-      if (hasReliableMealEstimate(freshResult.priceSummary)) {
+      const rawPricedItemCount = freshResult.items.filter(
+        (item) => typeof item.price === "number" && Number.isFinite(item.price),
+      ).length;
+      // Persist extracted facts even when today's estimator cannot yet turn them
+      // into a reliable per-person basket. A later estimator version can reuse
+      // these prices without hitting Grubhub again.
+      if (rawPricedItemCount > 0) {
         try {
           storeMenuSuccessOnce(placeId, sources, freshResult);
         } catch (cacheError) {
-          console.warn("Menu cache write failed; returning fresh data:", cacheError);
+          console.warn("Raw menu cache write failed; returning fresh data:", cacheError);
         }
-      } else {
+      }
+      if (!hasReliableMealEstimate(freshResult.priceSummary)) {
         const extractionWarnings = freshResult.menus.flatMap((menu) => menu.warnings);
         const rateLimited = extractionWarnings.some((warning) =>
           isTransientProviderFailureReason(warning),
@@ -156,9 +163,7 @@ export async function POST(request: Request) {
         restaurantTags: freshResult.restaurantTags,
         sourceProviders: sources.map((source) => source.provider),
         menuItemCount: freshResult.items.length,
-        rawPricedItemCount: freshResult.items.filter(
-          (item) => typeof item.price === "number" && Number.isFinite(item.price),
-        ).length,
+        rawPricedItemCount,
         rawPricedSample: freshResult.items.slice(0, 8).map((item) => ({
           name: item.name,
           price: item.price,
