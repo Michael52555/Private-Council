@@ -243,9 +243,19 @@ function familyFromRecognizedRoles(counts: Record<BasketFamily, number>): Basket
   return winner[0];
 }
 
-function featuredUnknownMains(
+function isFeaturedItem(item: MenuItem): boolean {
+  return item.featured === true || FEATURED_SECTION_PATTERN.test(item.section ?? "");
+}
+
+function preferredEvidence<T extends MenuItem>(items: T[]): T[] {
+  const featured = items.filter(isFeaturedItem);
+  return featured.length >= 2 ? featured : items;
+}
+
+function unknownMainCandidates(
   unknownItems: Array<MenuItem & { price: number }>,
   priced: Array<MenuItem & { price: number }>,
+  context: MealCompositionContext,
 ): Array<MenuItem & { price: number }> {
   const plausiblePrices = priced
     .filter((item) => !["accessory", "drink", "dessert", "side"].includes(classifyMenuItem(item)))
@@ -253,9 +263,23 @@ function featuredUnknownMains(
   const priceFloor = plausiblePrices.length > 0
     ? Math.max(2, distributionFromValues(plausiblePrices).median * 0.35)
     : 2;
-  return unknownItems.filter(
-    (item) => FEATURED_SECTION_PATTERN.test(item.section ?? "") && item.price >= priceFloor,
-  );
+  const plausible = unknownItems.filter((item) => item.price >= priceFloor);
+  const featured = plausible.filter(isFeaturedItem);
+  if (featured.length >= 2) return featured;
+
+  // Branded products often have names that do not say "bowl" or "salad".
+  // Grubhub's restaurant-level tags provide enough evidence to treat them as
+  // mains even when the restaurant has no Best Sellers section.
+  const tagText = (context.restaurantTags ?? []).join(" ");
+  if (
+    /\b(?:bowls?|salads?|burgers?|sandwich(?:es)?|wraps?|burritos?|ramen|udon|pasta|curry|poke|donburi|entrees?|entrées?)\b/i.test(
+      tagText,
+    ) &&
+    plausible.length >= 2
+  ) {
+    return plausible;
+  }
+  return featured;
 }
 
 function scaled(
@@ -341,7 +365,7 @@ export function estimateMealComposition(
   const sharedMains = roleItems("shared_main");
   const smallPlates = roleItems("small_plate");
   const unitItems = roleItems("unit_item");
-  const unknownMains = featuredUnknownMains(roleItems("unknown"), priced);
+  const unknownMains = unknownMainCandidates(roleItems("unknown"), priced, context);
   const scores = basketScores(priced, roles, context);
 
   // Existing Google fast-food labels are only a weak tie-breaker. The menu and
@@ -368,23 +392,25 @@ export function estimateMealComposition(
   const highConfidence = winner.score >= 18 && winner.margin >= 5;
 
   if (winner.family === "combo" && completeMeals.length >= 2) {
+    const evidence = preferredEvidence(completeMeals);
     return estimate(
       "combo_dominant",
-      completeMeals.length >= 3 && highConfidence ? "high" : "medium",
-      distribution(completeMeals),
-      completeMeals,
+      evidence.length >= 3 && highConfidence ? "high" : "medium",
+      distribution(evidence),
+      evidence,
       priced.length,
       false,
     );
   }
 
   if (winner.family === "shared" && sharedMains.length >= 2) {
-    const shared = sharedDistribution(sharedMains);
+    const evidence = preferredEvidence(sharedMains);
+    const shared = sharedDistribution(evidence);
     return estimate(
       "shared_dishes",
       shared.explicitServingCount >= 2 && highConfidence ? "high" : "medium",
       shared.values,
-      sharedMains,
+      evidence,
       priced.length,
       true,
     );
@@ -392,19 +418,20 @@ export function estimateMealComposition(
 
   const multiItems = [...smallPlates, ...unitItems];
   if (winner.family === "multi" && multiItems.length >= 2) {
-    const mostlyPiecePriced = unitItems.filter((item) =>
+    const evidence = preferredEvidence(multiItems);
+    const mostlyPiecePriced = evidence.filter((item) =>
       /\b(?:nigiri|sashimi|by the piece|per piece|individual pieces?)\b/i.test(itemText(item)),
-    ).length >= Math.ceil(multiItems.length / 2);
+    ).length >= Math.ceil(evidence.length / 2);
     return estimate(
       mostlyPiecePriced ? "unit_items" : "multiple_small_plates",
       highConfidence ? "high" : "medium",
       scaled(
-        distribution(multiItems),
+        distribution(evidence),
         mostlyPiecePriced
           ? { lower: 4, median: 5, upper: 6 }
           : { lower: 2, median: 2.5, upper: 3 },
       ),
-      multiItems,
+      evidence,
       priced.length,
       true,
     );
@@ -412,12 +439,13 @@ export function estimateMealComposition(
 
   const singleMains = [...regularMains, ...unknownMains];
   if (winner.family === "single" && singleMains.length >= 2) {
-    const recognizedCount = regularMains.length;
+    const evidence = preferredEvidence(singleMains);
+    const recognizedCount = evidence.filter((item) => roles.get(item.id) === "main").length;
     return estimate(
       "single_main",
       recognizedCount >= 3 && highConfidence ? "high" : "medium",
-      distribution(singleMains),
-      singleMains,
+      distribution(evidence),
+      evidence,
       priced.length,
       false,
     );

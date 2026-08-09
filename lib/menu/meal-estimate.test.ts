@@ -244,6 +244,43 @@ test("uses Grubhub bowl tags to recognize branded Best Sellers and exclude smoot
   assert.equal(mealEstimateConfidence(summary), "medium");
 });
 
+test("uses full Grubhub menu tags when Best Sellers is absent", () => {
+  const summary = summarizeTypicalMealPrices(
+    [
+      item("summer", "Summer Harvest", 14.5, "Seasonal Menu"),
+      item("garden", "Garden Signature", 15.5, "Seasonal Menu"),
+      item("acai", "Layered Smoothie - Acai", 12, "Seasonal Menu"),
+      item("tea", "Iced Green Tea", 3.5, "Beverages"),
+    ],
+    { restaurantTags: ["Bowls", "Healthy", "Salads"] },
+  );
+
+  assert.equal(summary.mealPattern, "single_main");
+  assert.equal(summary.sampleItemCount, 2);
+  assert.equal(summary.lowerQuartile, 14.5);
+  assert.equal(summary.median, 15);
+  assert.equal(summary.upperQuartile, 15.5);
+  assert.equal(mealEstimateConfidence(summary), "medium");
+});
+
+test("prefers featured mains but falls back to the complete main section", () => {
+  const featuredClassic = { ...item("classic", "Classic Burger", 11, "Burgers"), featured: true };
+  const featuredSpicy = { ...item("spicy", "Spicy Burger", 12, "Burgers"), featured: true };
+  const summary = summarizeTypicalMealPrices([
+    featuredClassic,
+    featuredSpicy,
+    item("premium", "Premium Steak Burger", 19, "Burgers"),
+    item("kids", "Kids Burger", 7, "Burgers"),
+    item("fries", "Fries", 4, "Sides"),
+  ]);
+
+  assert.equal(summary.mealPattern, "single_main");
+  assert.equal(summary.sampleItemCount, 2);
+  assert.equal(summary.lowerQuartile, 11);
+  assert.equal(summary.median, 11.5);
+  assert.equal(summary.upperQuartile, 12);
+});
+
 test("divides explicitly shared family meals by their serving count", () => {
   const summary = summarizeTypicalMealPrices([
     item("family-1", "Family Meal serves 4", 40, "Family Meals"),
