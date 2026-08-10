@@ -121,6 +121,65 @@ test("extracts DoorDash menu cards from rendered semantic HTML", () => {
   assert(result.methods.has("dom"));
 });
 
+test("extracts the server-rendered DoorDash Schema.org menu", () => {
+  const source = makeOrderingSource({
+    url: "https://www.doordash.com/store/blaze-pizza-irvine-385222/",
+    discoveredFrom: "google_maps",
+  });
+  const result = extractProviderMenuFromHtml(`
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "Menu",
+        "hasMenuSection": [{
+          "@type": "MenuSection",
+          "name": "Most Ordered",
+          "hasMenuItem": [{
+            "@type": "MenuItem",
+            "name": "Build Your Own Pizza (11-inch)",
+            "description": "Choose your toppings",
+            "offers": {"@type": "Offer", "price": "$17.68", "priceCurrency": "USD"}
+          }, {
+            "@type": "MenuItem",
+            "name": "2 Top Pizza",
+            "offers": {"@type": "Offer", "price": "$15.24"}
+          }]
+        }]
+      }
+    </script>
+  `, source, "doordash");
+
+  assert.deepEqual(
+    result.items.map((item) => [item.name, item.price, item.section]),
+    [
+      ["Build Your Own Pizza (11-inch)", 17.68, "Most Ordered"],
+      ["2 Top Pizza", 15.24, "Most Ordered"],
+    ],
+  );
+  assert(result.methods.has("json_ld"));
+});
+
+test("extracts DoorDash button cards whose product name is an aria-label", () => {
+  const source = makeOrderingSource({
+    url: "https://www.doordash.com/store/example-aria-card",
+    discoveredFrom: "google_maps",
+  });
+  const result = extractProviderMenuFromHtml(`
+    <main>
+      <h2 data-category-scroll-selector="popular-items">Most Ordered</h2>
+      <div aria-label="Build Your Own Pizza (11-inch)" tabindex="0" role="button">
+        <span>Build Your Own Pizza (11-inch)</span>
+        <span>$17.68</span>
+      </div>
+    </main>
+  `, source, "doordash");
+
+  assert.equal(result.items[0]?.name, "Build Your Own Pizza (11-inch)");
+  assert.equal(result.items[0]?.price, 17.68);
+  assert.equal(result.items[0]?.section, "Most Ordered");
+  assert(result.methods.has("dom"));
+});
+
 test("extracts Toast and Olo-style provider money schemas", () => {
   const source = makeOrderingSource({
     url: "https://order.toasttab.com/online/example",

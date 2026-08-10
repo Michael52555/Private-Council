@@ -1,7 +1,10 @@
 import { createHash } from "node:crypto";
 import * as cheerio from "cheerio";
 import type { MenuAdapterId } from "@/lib/menu/adapters";
-import type { HtmlMenuExtraction } from "@/lib/menu/html";
+import {
+  extractMenuFromJsonLd,
+  type HtmlMenuExtraction,
+} from "@/lib/menu/html";
 import type { CapturedJsonPayload, MenuItem, OrderingSource } from "@/lib/menu/types";
 
 type JsonObject = Record<string, unknown>;
@@ -530,6 +533,16 @@ function extractDoorDashSemanticDom(
   let currentSection: string | undefined;
 
   const productName = (container: ReturnType<typeof $>): string | undefined => {
+    const ariaLabel = container.attr("aria-label")?.replace(/\s+/g, " ").trim();
+    if (
+      ariaLabel &&
+      ariaLabel.length >= 2 &&
+      ariaLabel.length <= 140 &&
+      !isPriceOnlyMenuText(ariaLabel) &&
+      !ignoredHeading.test(ariaLabel)
+    ) {
+      return ariaLabel;
+    }
     const selectors = [
       "[data-testid*='item-name']",
       "[data-testid*='itemName']",
@@ -690,6 +703,12 @@ export function extractProviderMenuFromHtml(
     }
   });
   const embedded = extractProviderMenuFromJson(payloads, source, adapterId);
+  // DoorDash currently publishes its server-rendered menu most consistently as
+  // Schema.org MenuSection/MenuItem JSON-LD. Keep provider-scoped parsing for
+  // its application state, but do not discard this public structured menu.
+  const jsonLd = adapterId === "doordash"
+    ? extractMenuFromJsonLd(html, source)
+    : { items: [], methods: new Set<"json_ld" | "embedded_json" | "dom">() };
   const semanticItems = adapterId === "grubhub"
     ? extractGrubhubSemanticDom(html, source)
     : adapterId === "doordash"
@@ -701,12 +720,17 @@ export function extractProviderMenuFromHtml(
         ...extractRestaurantTagsFromDom(html),
       ])]
     : [];
-  const items = dedupe([...embedded.items, ...semanticItems]).slice(0, 750);
+  const items = dedupe([
+    ...embedded.items,
+    ...jsonLd.items,
+    ...semanticItems,
+  ]).slice(0, 750);
   return {
     items,
     restaurantTags,
     methods: new Set([
       ...(embedded.items.length > 0 ? (["embedded_json"] as const) : []),
+      ...(jsonLd.items.length > 0 ? (["json_ld"] as const) : []),
       ...(semanticItems.length > 0 ? (["dom"] as const) : []),
     ]),
   };

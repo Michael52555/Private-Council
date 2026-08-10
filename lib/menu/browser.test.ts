@@ -58,12 +58,14 @@ test("selects only the first Grubhub link when Google exposes variants", () => {
   assert.equal(selected?.href, "https://www.grubhub.com/restaurant/subway-delivery");
 });
 
-test("keeps only Grubhub and DoorDash ordering links", () => {
+test("keeps the first link for each supported provider in Google list order", () => {
   const selected = selectSupportedOrderingLinks([
     { href: "https://pressed.com/order", text: "Pressed" },
     { href: "https://www.pandaexpress.com/location", text: "Panda pickup" },
     { href: "https://www.doordash.com/store/panda-123", text: "DoorDash delivery" },
+    { href: "https://www.doordash.com/store/panda-123/pickup", text: "DoorDash pickup" },
     { href: "https://www.grubhub.com/restaurant/panda-123", text: "Grubhub delivery" },
+    { href: "https://www.grubhub.com/restaurant/panda-123?pickup=true", text: "Grubhub pickup" },
   ]);
 
   assert.deepEqual(selected.map((candidate) => candidate.text), [

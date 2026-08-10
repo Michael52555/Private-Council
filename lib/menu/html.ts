@@ -244,24 +244,41 @@ function dedupeItems(items: MenuItem[]): MenuItem[] {
   return [...byIdentity.values()];
 }
 
-export function extractMenuFromHtml(
+export function extractMenuFromJsonLd(
   html: string,
   source: OrderingSource,
 ): HtmlMenuExtraction {
   const $ = cheerio.load(html);
   const items: MenuItem[] = [];
-  const methods = new Set<"json_ld" | "embedded_json" | "dom">();
 
   $('script[type="application/ld+json"]').each((_, element) => {
     try {
       const value = JSON.parse($(element).text()) as unknown;
-      const before = items.length;
       walkJsonLd(value, source.id, items);
-      if (items.length > before) methods.add("json_ld");
     } catch {
-      // A malformed JSON-LD block should not prevent other extraction methods.
+      // Ignore malformed blocks and keep inspecting the remaining JSON-LD.
     }
   });
+
+  const dedupedItems = dedupeItems(items);
+  return {
+    items: dedupedItems,
+    methods: new Set(
+      dedupedItems.length > 0 ? (["json_ld"] as const) : [],
+    ),
+  };
+}
+
+export function extractMenuFromHtml(
+  html: string,
+  source: OrderingSource,
+): HtmlMenuExtraction {
+  const $ = cheerio.load(html);
+  const jsonLd = extractMenuFromJsonLd(html, source);
+  const items: MenuItem[] = [...jsonLd.items];
+  const methods = new Set<"json_ld" | "embedded_json" | "dom">(
+    jsonLd.methods,
+  );
 
   const embeddedJsonSelector =
     inferProvider(source.url).provider === "restaurant_website"
