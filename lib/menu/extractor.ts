@@ -146,7 +146,16 @@ export async function extractMenuFromSource(
         ]);
       }
       if (rendered.diagnostics.navigationStatus && rendered.diagnostics.navigationStatus >= 400) {
-        warnings.push(`Browser navigation returned HTTP ${rendered.diagnostics.navigationStatus}.`);
+        const diagnosticDetails = [
+          rendered.diagnostics.browserMode,
+          rendered.diagnostics.finalUrl,
+          rendered.diagnostics.pageTitle
+            ? `title: ${rendered.diagnostics.pageTitle}`
+            : undefined,
+        ].filter((detail): detail is string => Boolean(detail));
+        warnings.push(
+          `Browser navigation returned HTTP ${rendered.diagnostics.navigationStatus} before menu parsing${diagnosticDetails.length > 0 ? ` (${diagnosticDetails.join("; ")})` : ""}.`,
+        );
       }
       if (rendered.diagnostics.blockedResponseCount > 0) {
         warnings.push(
