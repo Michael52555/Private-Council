@@ -407,6 +407,51 @@ function isNonMenuProviderEndpoint(rawUrl: string): boolean {
   }
 }
 
+export function isProviderVerificationPage(
+  pageTitle: string,
+  bodyText: string,
+): boolean {
+  return /just a moment|checking your browser|verify (?:that )?you are human|performing security verification|attention required\s*!?\s*cloudflare/i.test(
+    `${pageTitle}\n${bodyText}`,
+  );
+}
+
+async function waitForAutomaticProviderVerification(
+  page: Page,
+  options: RenderMenuPageOptions,
+  navigationStatus?: number,
+): Promise<{ detected: boolean; cleared: boolean }> {
+  if (options.adapterId !== "doordash" || navigationStatus !== 403) {
+    return { detected: false, cleared: false };
+  }
+
+  const initialTitle = await page.title().catch(() => "");
+  const initialBody = await page
+    .locator("body")
+    .innerText({ timeout: 2_000 })
+    .catch(() => "");
+  if (!isProviderVerificationPage(initialTitle, initialBody)) {
+    return { detected: false, cleared: false };
+  }
+
+  // Cloudflare may complete its browser check automatically in the existing
+  // persistent Chrome session. Give that one verification attempt time to
+  // finish, but do not click or attempt to bypass an interactive CAPTCHA.
+  await page.waitForTimeout(10_000);
+  await page
+    .waitForLoadState("domcontentloaded", { timeout: 5_000 })
+    .catch(() => undefined);
+  const finalTitle = await page.title().catch(() => "");
+  const finalBody = await page
+    .locator("body")
+    .innerText({ timeout: 2_000 })
+    .catch(() => "");
+  return {
+    detected: true,
+    cleared: !isProviderVerificationPage(finalTitle, finalBody),
+  };
+}
+
 export async function renderPublicPage(rawUrl: string, options: RenderMenuPageOptions = {}): Promise<{
   html: string;
   finalUrl: string;
@@ -488,7 +533,15 @@ export async function renderPublicPage(rawUrl: string, options: RenderMenuPageOp
       waitUntil: "domcontentloaded",
       timeout: 25_000,
     });
-    if (navigationResponse && navigationResponse.status() >= 400) {
+    const verification = await waitForAutomaticProviderVerification(
+      page,
+      options,
+      navigationResponse?.status(),
+    );
+    const effectiveNavigationStatus = verification.cleared
+      ? 200
+      : navigationResponse?.status();
+    if (effectiveNavigationStatus && effectiveNavigationStatus >= 400) {
       await Promise.allSettled([...pendingCaptures]);
       return {
         html: await page.content(),
@@ -497,8 +550,10 @@ export async function renderPublicPage(rawUrl: string, options: RenderMenuPageOp
         diagnostics: {
           browserMode,
           pageTitle: await page.title().catch(() => ""),
-          navigationStatus: navigationResponse.status(),
+          navigationStatus: effectiveNavigationStatus,
           finalUrl: page.url(),
+          verificationChallengeDetected: verification.detected,
+          verificationChallengeCleared: verification.cleared,
           locationSelectionAttempted: false,
           locationSelectionSucceeded: false,
           capturedJsonResponseCount: jsonPayloads.length,
@@ -542,8 +597,10 @@ export async function renderPublicPage(rawUrl: string, options: RenderMenuPageOp
       diagnostics: {
         browserMode,
         pageTitle: await activePage.title().catch(() => ""),
-        navigationStatus: navigationResponse?.status(),
+        navigationStatus: effectiveNavigationStatus,
         finalUrl: activePage.url(),
+        verificationChallengeDetected: verification.detected,
+        verificationChallengeCleared: verification.cleared,
         locationSelectionAttempted: locationResult.attempted,
         locationSelectionSucceeded: locationResult.succeeded,
         capturedJsonResponseCount: jsonPayloads.length,
