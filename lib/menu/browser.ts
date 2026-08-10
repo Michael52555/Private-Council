@@ -1030,8 +1030,21 @@ export async function discoverGoogleOrderingLinks(
 
     context.on("page", recordNavigation);
     context.on("request", (request) => {
-      if (!request.isNavigationRequest() || request.resourceType() !== "document") return;
-      if (request.frame().parentFrame()) return;
+      if (
+        !request.isNavigationRequest() ||
+        request.resourceType() !== "document"
+      ) {
+        return;
+      }
+
+      try {
+        if (request.frame().parentFrame()) return;
+      } catch {
+        // Chromium can emit the initial document request for a newly opened
+        // page before Playwright has created its Frame object. It is still a
+        // valid top-level navigation candidate, so keep recording its URL.
+      }
+
       recordExternalNavigation(
         request.url(),
         "Document navigation from the Google Maps ordering control",
