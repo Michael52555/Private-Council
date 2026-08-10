@@ -14,6 +14,7 @@ import {
   extractProviderMenuFromJson,
 } from "@/lib/menu/provider-parsers";
 import { fetchPublicHtml } from "@/lib/menu/security";
+import { runProviderQueued } from "@/lib/menu/provider-queue";
 import type {
   ExtractedMenu,
   MenuItem,
@@ -223,18 +224,35 @@ export async function extractMenusWithFallback(
     restaurantName?: string;
     mealProfile?: RestaurantMealProfile;
   } = {},
-  extractSource: (
+  extractSource?: (
     source: OrderingSource,
     context: {
       restaurantAddress?: string;
       restaurantName?: string;
       mealProfile?: RestaurantMealProfile;
     },
-  ) => Promise<ExtractedMenu> = extractMenuFromSource,
+  ) => Promise<ExtractedMenu>,
 ): Promise<ExtractedMenu[]> {
   const menus: ExtractedMenu[] = [];
+  const extractQueuedSource = extractSource ?? ((source, extractionContext) =>
+    runProviderQueued(source.provider, () =>
+      extractMenuFromSource(source, extractionContext),
+    ));
   for (const [sourceIndex, source] of sources.slice(0, 3).entries()) {
-    const menu = await extractSource(source, context);
+    let menu: ExtractedMenu;
+    try {
+      menu = await extractQueuedSource(source, context);
+    } catch (error) {
+      menu = {
+        source,
+        items: [],
+        extractionMethod: "none",
+        fetchedAt: new Date().toISOString(),
+        warnings: [
+          `Provider extraction failed before menu parsing: ${error instanceof Error ? error.message : "Unknown provider error."}`,
+        ],
+      };
+    }
     const mealSummary = summarizeTypicalMealPrices(menu.items, {
       restaurantName: context.restaurantName,
       mealProfile: context.mealProfile,
