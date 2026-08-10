@@ -77,3 +77,56 @@ test("tries Grubhub when DoorDash returns no menu prices", async () => {
   assert.equal(menus.length, 2);
   assert.match(menus[1].warnings[0], /Fallback provider used/);
 });
+
+test("tries Grubhub when DoorDash extraction throws", async () => {
+  const doordash = makeOrderingSource({
+    url: "https://www.doordash.com/store/example-123",
+    discoveredFrom: "google_maps",
+  });
+  const grubhub = makeOrderingSource({
+    url: "https://www.grubhub.com/restaurant/example-123",
+    discoveredFrom: "google_maps",
+  });
+  const called: string[] = [];
+
+  const menus = await extractMenusWithFallback(
+    [doordash, grubhub],
+    {},
+    async (source) => {
+      called.push(source.provider);
+      if (source === doordash) throw new Error("DoorDash verification blocked");
+      return menuFor(source, [14, 16, 18]);
+    },
+  );
+
+  assert.deepEqual(called, ["doordash", "grubhub"]);
+  assert.equal(menus.length, 2);
+  assert.match(menus[0].warnings[0], /DoorDash verification blocked/);
+  assert.match(menus[1].warnings[0], /Fallback provider used/);
+});
+
+test("returns failed provider attempts so the caller can use budget fallback", async () => {
+  const doordash = makeOrderingSource({
+    url: "https://www.doordash.com/store/example-123",
+    discoveredFrom: "google_maps",
+  });
+  const grubhub = makeOrderingSource({
+    url: "https://www.grubhub.com/restaurant/example-123",
+    discoveredFrom: "google_maps",
+  });
+
+  const menus = await extractMenusWithFallback(
+    [doordash, grubhub],
+    {},
+    async (source) => {
+      throw new Error(`${source.label} blocked`);
+    },
+  );
+
+  assert.equal(menus.length, 2);
+  assert.deepEqual(menus.map((menu) => menu.source.provider), [
+    "doordash",
+    "grubhub",
+  ]);
+  assert.ok(menus.every((menu) => menu.items.length === 0));
+});
