@@ -47,10 +47,9 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "At least one ordering source is required." }, { status: 400 });
     }
 
-    // The unified pipeline intentionally scrapes only the first supported result.
-    // Enforce that at the API boundary as well so an older browser/database cache
-    // cannot make one restaurant trigger duplicate provider sessions.
-    const sources = body.sources.filter(isOrderingSource).slice(0, 1);
+    // Keep Google Maps' provider order and allow the extractor to try the next
+    // supported provider only when a higher-listed source has no reliable menu.
+    const sources = body.sources.filter(isOrderingSource).slice(0, 3);
     const retryFailed = body.retryFailed === true;
     const mealProfile: RestaurantMealProfile = body.mealProfile === "fast_food"
       ? "fast_food"

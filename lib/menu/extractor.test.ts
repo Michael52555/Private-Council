@@ -50,3 +50,30 @@ test("falls back in provider order after the primary source has no reliable pric
   assert.equal(menus.length, 2);
   assert.match(menus[1].warnings[0], /Fallback provider used/);
 });
+
+test("tries Grubhub when DoorDash returns no menu prices", async () => {
+  const doordash = makeOrderingSource({
+    url: "https://www.doordash.com/store/example-123",
+    discoveredFrom: "google_maps",
+  });
+  const grubhub = makeOrderingSource({
+    url: "https://www.grubhub.com/restaurant/example-123",
+    discoveredFrom: "google_maps",
+  });
+  const called: string[] = [];
+
+  const menus = await extractMenusWithFallback(
+    [doordash, grubhub],
+    {},
+    async (source) => {
+      called.push(source.provider);
+      return source === grubhub
+        ? menuFor(source, [14, 16, 18])
+        : menuFor(source, []);
+    },
+  );
+
+  assert.deepEqual(called, ["doordash", "grubhub"]);
+  assert.equal(menus.length, 2);
+  assert.match(menus[1].warnings[0], /Fallback provider used/);
+});

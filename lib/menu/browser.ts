@@ -811,9 +811,13 @@ export function selectFirstSupportedOrderingLink(
 export function selectSupportedOrderingLinks(
   links: LinkCandidate[],
 ): LinkCandidate[] {
-  return links.filter((candidate) =>
-    Boolean(activeProviderAdapterForUrl(candidate.href)),
-  );
+  const seenProviders = new Set<MenuAdapterId>();
+  return links.filter((candidate) => {
+    const adapter = activeProviderAdapterForUrl(candidate.href);
+    if (!adapter || seenProviders.has(adapter.id)) return false;
+    seenProviders.add(adapter.id);
+    return true;
+  });
 }
 
 function sourceFromCandidate(
@@ -1015,11 +1019,13 @@ export async function discoverGoogleOrderingLinks(
       .filter((candidate) => !activeProviderAdapterForUrl(candidate.href))
       .map((candidate) => candidate.text || new URL(candidate.href).hostname);
 
-    if (primarySelectedLink) {
+    if (supportedSelectedLinks.length > 0) {
       sources.push(
-        sourceFromCandidate(
-          primarySelectedLink,
-          dialogVisible ? "google_maps_dialog" : "google_maps_new_link",
+        ...supportedSelectedLinks.slice(0, 3).map((candidate) =>
+          sourceFromCandidate(
+            candidate,
+            dialogVisible ? "google_maps_dialog" : "google_maps_new_link",
+          ),
         ),
       );
     }
@@ -1050,9 +1056,8 @@ export async function discoverGoogleOrderingLinks(
     );
     if (!primarySelectedLink && supportedNavigationCandidates.length > 0) {
       sources.push(
-        sourceFromCandidate(
-          supportedNavigationCandidates[0],
-          "google_maps_navigation",
+        ...supportedNavigationCandidates.slice(0, 3).map((candidate) =>
+          sourceFromCandidate(candidate, "google_maps_navigation"),
         ),
       );
     }
@@ -1084,10 +1089,9 @@ export async function discoverGoogleOrderingLinks(
       ]),
     ].slice(0, 20);
 
-    // Use the first supported result in Google Maps' delivery ordering list.
-    // The supported set is intentionally small (Grubhub and DoorDash), and
-    // duplicate pickup/tracking variants do not improve a restaurant estimate.
-    const dedupedSources = dedupeSources(sources).slice(0, 1);
+    // Preserve Google Maps' provider order, but retain enough supported sources
+    // to fail over when the first provider is blocked or has no usable prices.
+    const dedupedSources = dedupeSources(sources).slice(0, 3);
     if (dedupedSources.length === 0) {
       if (!orderingModeResult.deliveryModeActivated) {
         warnings.push(
