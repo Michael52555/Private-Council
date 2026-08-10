@@ -157,6 +157,14 @@ export async function extractMenuFromSource(
           `Browser navigation returned HTTP ${rendered.diagnostics.navigationStatus} before menu parsing${diagnosticDetails.length > 0 ? ` (${diagnosticDetails.join("; ")})` : ""}.`,
         );
       }
+      if (
+        rendered.diagnostics.verificationChallengeDetected &&
+        !rendered.diagnostics.verificationChallengeCleared
+      ) {
+        warnings.push(
+          "DoorDash browser verification did not clear automatically; the next provider will be tried when one is available.",
+        );
+      }
       if (rendered.diagnostics.blockedResponseCount > 0) {
         warnings.push(
           `${rendered.diagnostics.blockedResponseCount} provider response${rendered.diagnostics.blockedResponseCount === 1 ? " was" : "s were"} blocked (HTTP 401/403/429)${rendered.diagnostics.blockedResponseEndpoints.length > 0 ? `: ${rendered.diagnostics.blockedResponseEndpoints.slice(0, 3).join(", ")}` : ""}.`,
