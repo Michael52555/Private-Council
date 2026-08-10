@@ -229,19 +229,33 @@ async function attemptLocationSelection(
     clickedResult = await clickMatchingLocationResult(page, address);
   }
 
-  if (!clickedResult && !input) return { attempted: false, succeeded: false };
+  // Grubhub can render "Enter an address" as a button rather than an input.
+  // In that state the menu categories are visible, but product cards and their
+  // prices stay hidden until pickup is selected. Try the explicit pickup
+  // fallback before concluding that there is no location control to use.
+  const clickedPickup = !clickedResult && await clickFirstVisible(page, [
+    /^switch to pickup$/i,
+    /^pickup instead$/i,
+    /^pickup$/i,
+  ]);
 
-  const clickedCta = clickedResult || await clickFirstVisible(page, [
+  if (!clickedResult && !input && !clickedPickup) {
+    return { attempted: false, succeeded: false };
+  }
+
+  const clickedCta = clickedResult || clickedPickup || await clickFirstVisible(page, [
     /select (?:this )?location/i,
     /choose (?:this )?location/i,
     /order from (?:this )?location/i,
     /start (?:an )?order/i,
     /order (?:now|pickup|here)/i,
     /view menu/i,
-    /pickup/i,
   ]);
   await page.waitForLoadState("domcontentloaded", { timeout: 8_000 }).catch(() => undefined);
-  await page.waitForTimeout(1_500);
+  // Grubhub hydrates product cards after the fulfillment-mode change without
+  // navigating. Give that client-side request enough time to populate the DOM
+  // and to be captured by the response listener.
+  await page.waitForTimeout(clickedPickup ? 3_000 : 1_500);
   return {
     attempted: true,
     succeeded: clickedCta || page.url() !== initialUrl,
