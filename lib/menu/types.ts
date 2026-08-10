@@ -65,6 +65,13 @@ export type CapturedJsonPayload = {
 };
 
 export type MenuBrowserDiagnostics = {
+  browserMode?:
+    | "remote_persistent"
+    | "remote_isolated"
+    | "local_persistent_headed"
+    | "local_isolated_headed"
+    | "local_isolated_headless";
+  pageTitle?: string;
   navigationStatus?: number;
   finalUrl: string;
   locationSelectionAttempted: boolean;
