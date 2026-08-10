@@ -2,12 +2,28 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   isDeliveryOrderingModeLabel,
+  isProviderVerificationPage,
   providerStartUrl,
   scoreGoogleOrderControlLabel,
   selectFirstSupportedOrderingLink,
   selectGoogleOrderingLinkCandidates,
   selectSupportedOrderingLinks,
 } from "@/lib/menu/browser";
+
+test("recognizes DoorDash browser-verification interstitials", () => {
+  assert.equal(isProviderVerificationPage("Just a moment...", ""), true);
+  assert.equal(
+    isProviderVerificationPage("DoorDash", "Checking your browser before accessing DoorDash"),
+    true,
+  );
+  assert.equal(
+    isProviderVerificationPage(
+      "Order Wingstop - Menu Delivery",
+      "Featured Items Wing Combos Drinks",
+    ),
+    false,
+  );
+});
 
 test("recognizes English and Chinese delivery mode labels", () => {
   assert.equal(isDeliveryOrderingModeLabel("Delivery"), true);
