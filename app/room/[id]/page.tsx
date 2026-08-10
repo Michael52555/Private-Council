@@ -562,31 +562,6 @@ function activateGoogleBudgetFallback(
   };
 }
 
-function markBudgetTemporarilyUnavailable(
-  candidate: RestaurantCandidate,
-): RestaurantCandidate {
-  return {
-    ...candidate,
-    estimatedPriceMin: null,
-    estimatedPriceMax: null,
-    pricePerPerson: null,
-    budgetEstimateSource: "unavailable",
-    budgetEstimateConfidence: "none",
-    budgetEstimateCurrency: null,
-    menuStatus: "unavailable",
-  };
-}
-
-function menuResultWasRateLimited(result: RestaurantMenuResult): boolean {
-  return result.menus.some((menu) =>
-    menu.warnings.some((warning) =>
-      /(?:HTTP\s*429|too many requests|rate[ -]?limit|temporar(?:y|ily) unavailable)/i.test(
-        warning,
-      ),
-    ),
-  );
-}
-
 function BudgetEstimatePanel({ candidate }: { candidate: RestaurantCandidate }) {
   const isQueuedForMenu = candidate.menuStatus === "pending";
   const isCheckingMenu = candidate.menuStatus === "loading";
@@ -1201,12 +1176,6 @@ export default function RoomPage() {
           if (entry.id !== candidate.id) return entry;
           const hasReliablePriceSample = hasReliableMealEstimate(data.priceSummary);
           if (!hasReliablePriceSample) {
-            if (menuResultWasRateLimited(data)) {
-              return markBudgetTemporarilyUnavailable({
-                ...entry,
-                menuItemCount: data.items.length,
-              });
-            }
             return activateGoogleBudgetFallback(
               { ...entry, menuItemCount: data.items.length },
               "loaded",
@@ -1231,16 +1200,10 @@ export default function RoomPage() {
       const errorMessage = error instanceof Error
         ? error.message
         : "Could not extract the primary menu.";
-      const isTemporaryFailure =
-        /(?:temporary provider failure|timed out|HTTP\s*429|too many requests|rate[ -]?limit)/i.test(
-          errorMessage,
-        );
       setCandidates((current) =>
         current.map((entry) =>
           entry.id === candidate.id
-            ? isTemporaryFailure
-              ? markBudgetTemporarilyUnavailable(entry)
-              : activateGoogleBudgetFallback(entry, "loaded")
+            ? activateGoogleBudgetFallback(entry, "loaded")
             : entry,
         ),
       );
