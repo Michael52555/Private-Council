@@ -73,6 +73,8 @@ export type MenuBrowserDiagnostics = {
     | "local_isolated_headless";
   pageTitle?: string;
   navigationStatus?: number;
+  verificationChallengeDetected?: boolean;
+  verificationChallengeCleared?: boolean;
   finalUrl: string;
   locationSelectionAttempted: boolean;
   locationSelectionSucceeded: boolean;
