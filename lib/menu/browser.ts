@@ -6,6 +6,7 @@ import {
   type Page,
 } from "playwright-core";
 import { existsSync } from "node:fs";
+import { join } from "node:path";
 import {
   dedupeSources,
   inferProvider,
@@ -31,6 +32,51 @@ export class BrowserNotConfiguredError extends Error {
       "Dynamic ordering-page discovery needs PLAYWRIGHT_WS_ENDPOINT or PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH.",
     );
     this.name = "BrowserNotConfiguredError";
+  }
+}
+
+type MenuBrowserGlobal = typeof globalThis & {
+  restaurantRemoteBrowser?: {
+    endpoint: string;
+    browser?: Browser;
+    connecting?: Promise<Browser>;
+  };
+};
+
+async function sharedRemoteBrowser(endpoint: string): Promise<Browser> {
+  const browserGlobal = globalThis as MenuBrowserGlobal;
+  const current = browserGlobal.restaurantRemoteBrowser;
+  if (
+    current?.endpoint === endpoint &&
+    current.browser?.isConnected()
+  ) {
+    return current.browser;
+  }
+  if (current?.endpoint === endpoint && current.connecting) {
+    return current.connecting;
+  }
+
+  const state: NonNullable<MenuBrowserGlobal["restaurantRemoteBrowser"]> = {
+    endpoint,
+  };
+  const connecting = chromium.connectOverCDP(endpoint);
+  state.connecting = connecting;
+  browserGlobal.restaurantRemoteBrowser = state;
+  try {
+    const browser = await connecting;
+    state.browser = browser;
+    state.connecting = undefined;
+    browser.once("disconnected", () => {
+      if (browserGlobal.restaurantRemoteBrowser?.browser === browser) {
+        browserGlobal.restaurantRemoteBrowser = undefined;
+      }
+    });
+    return browser;
+  } catch (error) {
+    if (browserGlobal.restaurantRemoteBrowser === state) {
+      browserGlobal.restaurantRemoteBrowser = undefined;
+    }
+    throw error;
   }
 }
 
@@ -68,7 +114,7 @@ export function isBrowserConfigured(): boolean {
 async function openBrowser(headless = true): Promise<{ browser: Browser; remote: boolean }> {
   const wsEndpoint = process.env.PLAYWRIGHT_WS_ENDPOINT ?? process.env.BROWSER_WS_ENDPOINT;
   if (wsEndpoint) {
-    return { browser: await chromium.connectOverCDP(wsEndpoint), remote: true };
+    return { browser: await sharedRemoteBrowser(wsEndpoint), remote: true };
   }
 
   const executablePath =
@@ -85,25 +131,98 @@ async function openBrowser(headless = true): Promise<{ browser: Browser; remote:
 }
 
 async function withPage<T>(
-  task: (page: Page, context: BrowserContext) => Promise<T>,
-  options: { headless?: boolean } = {},
+  task: (
+    page: Page,
+    context: BrowserContext,
+    browserMode: MenuBrowserDiagnostics["browserMode"],
+  ) => Promise<T>,
+  options: {
+    headless?: boolean;
+    persistentProviderSession?: boolean;
+  } = {},
 ): Promise<T> {
-  const { browser } = await openBrowser(options.headless ?? true);
-  const context = await browser.newContext({
+  const headless = options.headless ?? true;
+  const contextOptions = {
     locale: "en-US",
     viewport: { width: 1440, height: 1200 },
     extraHTTPHeaders: {
       "Accept-Language": "en-US,en;q=0.9",
     },
-  });
+  } as const;
+  const wsEndpoint = process.env.PLAYWRIGHT_WS_ENDPOINT ?? process.env.BROWSER_WS_ENDPOINT;
+  const executablePath =
+    process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH ??
+    systemChromePath();
+
+  let browser: Browser;
+  let context: BrowserContext;
+  let ownsContext = true;
+  let shouldCloseBrowser = true;
+  let browserMode: MenuBrowserDiagnostics["browserMode"];
+
+  if (wsEndpoint) {
+    ({ browser } = await openBrowser(headless));
+    const existingContext = options.persistentProviderSession
+      ? browser.contexts()[0]
+      : undefined;
+    context = existingContext ?? await browser.newContext(contextOptions);
+    ownsContext = !existingContext;
+    // browser.close() on a CDP connection can terminate the shared remote
+    // Chrome instance. Disconnecting happens when this Browser object is
+    // garbage-collected; only pages/contexts created by this task are closed.
+    shouldCloseBrowser = false;
+    browserMode = existingContext ? "remote_persistent" : "remote_isolated";
+  } else if (
+    options.persistentProviderSession &&
+    executablePath &&
+    !headless &&
+    (process.platform === "darwin" || process.platform === "win32")
+  ) {
+    // DoorDash rejects the short-lived headless/incognito session before its
+    // menu HTML is returned. A stable local profile mirrors the normal Chrome
+    // session that users reach from Google Maps and retains provider cookies
+    // between restaurant checks.
+    context = await chromium.launchPersistentContext(
+      join(process.cwd(), ".data", "playwright-provider-session"),
+      {
+        executablePath,
+        headless: false,
+        ...contextOptions,
+      },
+    );
+    const persistentBrowser = context.browser();
+    if (!persistentBrowser) {
+      await context.close().catch(() => undefined);
+      throw new Error("The persistent provider browser did not start correctly.");
+    }
+    browser = persistentBrowser;
+    browserMode = "local_persistent_headed";
+  } else {
+    ({ browser } = await openBrowser(headless));
+    context = await browser.newContext(contextOptions);
+    browserMode = headless ? "local_isolated_headless" : "local_isolated_headed";
+  }
+
+  const baselinePages = new Set(context.pages());
   const page = await context.newPage();
   page.setDefaultTimeout(8_000);
 
   try {
-    return await task(page, context);
+    return await task(page, context, browserMode);
   } finally {
-    await context.close().catch(() => undefined);
-    await browser.close().catch(() => undefined);
+    if (!ownsContext) {
+      await Promise.all(
+        context
+          .pages()
+          .filter((candidatePage) => !baselinePages.has(candidatePage))
+          .map((candidatePage) => candidatePage.close().catch(() => undefined)),
+      );
+    } else {
+      await context.close().catch(() => undefined);
+    }
+    if (shouldCloseBrowser) {
+      await browser.close().catch(() => undefined);
+    }
   }
 }
 
@@ -295,7 +414,14 @@ export async function renderPublicPage(rawUrl: string, options: RenderMenuPageOp
   diagnostics: MenuBrowserDiagnostics;
 }> {
   const url = await assertPublicHttpsUrl(providerStartUrl(rawUrl, options));
-  return withPage(async (page, context) => {
+  const usePersistentProviderSession = options.adapterId === "doordash";
+  const localDesktopDoorDash =
+    usePersistentProviderSession &&
+    !process.env.PLAYWRIGHT_WS_ENDPOINT &&
+    !process.env.BROWSER_WS_ENDPOINT &&
+    (process.platform === "darwin" || process.platform === "win32");
+
+  return withPage(async (page, context, browserMode) => {
     const jsonPayloads: CapturedJsonPayload[] = [];
     const pendingCaptures = new Set<Promise<void>>();
     let capturedBytes = 0;
@@ -369,6 +495,8 @@ export async function renderPublicPage(rawUrl: string, options: RenderMenuPageOp
         finalUrl: page.url(),
         jsonPayloads,
         diagnostics: {
+          browserMode,
+          pageTitle: await page.title().catch(() => ""),
           navigationStatus: navigationResponse.status(),
           finalUrl: page.url(),
           locationSelectionAttempted: false,
@@ -412,6 +540,8 @@ export async function renderPublicPage(rawUrl: string, options: RenderMenuPageOp
       finalUrl: activePage.url(),
       jsonPayloads,
       diagnostics: {
+        browserMode,
+        pageTitle: await activePage.title().catch(() => ""),
         navigationStatus: navigationResponse?.status(),
         finalUrl: activePage.url(),
         locationSelectionAttempted: locationResult.attempted,
@@ -423,7 +553,10 @@ export async function renderPublicPage(rawUrl: string, options: RenderMenuPageOp
         blockedResponseEndpoints: [...blockedResponseEndpoints],
       },
     };
-  }, { headless: options.headless });
+  }, {
+    headless: options.headless ?? !localDesktopDoorDash,
+    persistentProviderSession: usePersistentProviderSession,
+  });
 }
 
 function isGoogleMapsHost(hostname: string): boolean {
@@ -897,19 +1030,8 @@ export async function discoverGoogleOrderingLinks(
 
     context.on("page", recordNavigation);
     context.on("request", (request) => {
-      if (
-        !request.isNavigationRequest() ||
-        request.resourceType() !== "document"
-      ) {
-        return;
-      }
-
-      try {
-        if (request.frame().parentFrame()) return;
-      } catch {
-        // The initial navigation of a newly created page may not have a frame yet.
-      }
-
+      if (!request.isNavigationRequest() || request.resourceType() !== "document") return;
+      if (request.frame().parentFrame()) return;
       recordExternalNavigation(
         request.url(),
         "Document navigation from the Google Maps ordering control",
