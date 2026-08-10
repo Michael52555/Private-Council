@@ -7,7 +7,6 @@ import {
   storeMenuSuccessOnce,
 } from "@/lib/menu/database-cache";
 import { runSingleFlight } from "@/lib/menu/singleflight";
-import { runProviderQueued } from "@/lib/menu/provider-queue";
 import { hasReliableMealEstimate } from "@/lib/menu/meal-estimate";
 import { classifyMenuItem } from "@/lib/menu/meal-composition";
 import type { OrderingSource, RestaurantMealProfile } from "@/lib/menu/types";
@@ -105,17 +104,15 @@ export async function POST(request: Request) {
 
       let freshResult;
       try {
-        freshResult = await runProviderQueued(sources[0].provider, () =>
-          extractRestaurantMenus({
-            placeId,
-            restaurantName: typeof body.restaurantName === "string" ? body.restaurantName.trim() : undefined,
-            restaurantAddress: typeof body.restaurantAddress === "string"
-              ? body.restaurantAddress.trim().slice(0, 500)
-              : undefined,
-            mealProfile,
-            sources,
-          }),
-        );
+        freshResult = await extractRestaurantMenus({
+          placeId,
+          restaurantName: typeof body.restaurantName === "string" ? body.restaurantName.trim() : undefined,
+          restaurantAddress: typeof body.restaurantAddress === "string"
+            ? body.restaurantAddress.trim().slice(0, 500)
+            : undefined,
+          mealProfile,
+          sources,
+        });
       } catch (error) {
         try {
           storeMenuFailure(
