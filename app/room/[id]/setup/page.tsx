@@ -12,6 +12,11 @@ import type {
   Preference,
   RoomConfig,
   LocalAgentState,
+  FoodType,
+} from "@/lib/planning-types";
+import {
+  FOOD_TYPE_OPTIONS,
+  foodTypeLabel,
 } from "@/lib/planning-types";
 
 
@@ -107,7 +112,7 @@ const modeLabels: Record<PlanningMode, string> = {
 const sectionLabels: Record<SetupSection, string> = {
   location: "Starting location",
   distance: "Distance",
-  food: "Food & allergies",
+  food: "Food type",
   transportation: "Transportation",
   budget: "Budget",
   departure_time: "Departure time",
@@ -185,6 +190,18 @@ export default function SetupPage() {
     useState(false);
 
     const [distanceError, setDistanceError] =
+    useState("");
+
+    const [preferredFoodTypes, setPreferredFoodTypes] =
+    useState<FoodType[]>([]);
+
+    const [foodImportance, setFoodImportance] =
+    useState<Importance>(3);
+
+    const [foodVisibility, setFoodVisibility] =
+    useState<Visibility>("private");
+
+    const [foodError, setFoodError] =
     useState("");
 
     const [budgetStatement, setBudgetStatement] =
@@ -345,6 +362,16 @@ export default function SetupPage() {
     return;
     }
 
+    if (
+        selectedCategories.includes("food") &&
+        preferredFoodTypes.length === 0
+    ) {
+        setFoodError(
+        "Select at least one food type before entering the room.",
+        );
+        return;
+    }
+
     const roomConfig: RoomConfig = {
         version: 1,
         mode,
@@ -396,11 +423,18 @@ export default function SetupPage() {
         preference.category === "budget",
     );
 
+    const existingFoodPreference =
+    existingPreferences.find(
+        (preference) =>
+        preference.category === "food",
+    );
+
     const nextPreferences: Preference[] =
     existingPreferences.filter(
         (preference) =>
         preference.category !== "distance" &&
         preference.category !== "budget" &&
+        preference.category !== "food" &&
         selectedCategories.includes(
             preference.category,
         ),
@@ -474,6 +508,32 @@ export default function SetupPage() {
             },
         });
         }
+
+    if (
+        selectedCategories.includes("food") &&
+        preferredFoodTypes.length > 0
+    ) {
+        const foodTypeNames = preferredFoodTypes.map(foodTypeLabel);
+        nextPreferences.push({
+            id:
+            existingFoodPreference?.id ??
+            crypto.randomUUID(),
+            category: "food",
+            statement: foodTypeNames.join(", "),
+            importance: foodImportance,
+            visibility: foodVisibility,
+            interpretation: {
+                status: "success",
+                summary: `Preferred food types: ${foodTypeNames.join(", ")}`,
+                structuredData: {
+                    preferredFoodTypes,
+                },
+                clarificationQuestion: null,
+                source: "fixed",
+                confirmed: true,
+            },
+        });
+    }
 
     const nextLocalAgentState: LocalAgentState = {
         version: 1,
@@ -1214,6 +1274,106 @@ export default function SetupPage() {
                                     Confirmed
                                 </span>
                                 )}
+                            </div>
+                            )}
+                        </section>
+                        )}
+
+                    {selectedCategories.includes("food") && (
+                        <section className="mt-5 rounded-3xl border border-purple-100 bg-white p-6 shadow-sm">
+                            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-purple-600">
+                            Food type
+                            </p>
+
+                            <h3 className="mt-2 text-xl font-semibold text-gray-950">
+                            What kinds of food would you like?
+                            </h3>
+
+                            <p className="mt-2 text-sm leading-6 text-gray-500">
+                            Choose one or more. These are saved as a confirmed fixed preference.
+                            </p>
+
+                            <div className="mt-5 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+                            {FOOD_TYPE_OPTIONS.map((option) => {
+                                const selected = preferredFoodTypes.includes(option.value);
+                                return (
+                                <button
+                                    key={option.value}
+                                    type="button"
+                                    aria-pressed={selected}
+                                    onClick={() => {
+                                    setPreferredFoodTypes((current) =>
+                                        current.includes(option.value)
+                                        ? current.filter((value) => value !== option.value)
+                                        : [...current, option.value],
+                                    );
+                                    setFoodError("");
+                                    }}
+                                    className={`rounded-xl border px-3 py-3 text-sm font-semibold transition ${
+                                    selected
+                                        ? "border-purple-600 bg-purple-600 text-white"
+                                        : "border-gray-200 bg-gray-50 text-gray-700 hover:border-purple-300 hover:bg-purple-50"
+                                    }`}
+                                >
+                                    {option.label}
+                                </button>
+                                );
+                            })}
+                            </div>
+
+                            <fieldset className="mt-5">
+                            <legend className="text-sm font-semibold text-gray-800">
+                                How important is this?
+                            </legend>
+
+                            <div className="mt-3 grid grid-cols-5 gap-2">
+                                {([1, 2, 3, 4, 5] as Importance[]).map((importance) => (
+                                <button
+                                    key={importance}
+                                    type="button"
+                                    onClick={() => setFoodImportance(importance)}
+                                    className={`rounded-xl border py-3 font-semibold transition ${
+                                    foodImportance === importance
+                                        ? "border-purple-600 bg-purple-600 text-white"
+                                        : "border-gray-200 bg-gray-50 text-gray-700 hover:border-purple-200 hover:bg-purple-50"
+                                    }`}
+                                >
+                                    {importance}
+                                </button>
+                                ))}
+                            </div>
+                            </fieldset>
+
+                            <label className="mt-5 block text-sm font-semibold text-gray-800">
+                            Visibility
+                            </label>
+
+                            <select
+                            value={foodVisibility}
+                            onChange={(event) =>
+                                setFoodVisibility(event.target.value as Visibility)
+                            }
+                            className="mt-2 w-full rounded-2xl border border-gray-300 bg-gray-50 px-4 py-3 text-gray-900"
+                            >
+                            <option value="private">Only my agent</option>
+                            <option value="anonymous">Anonymous to the group</option>
+                            <option value="shareable">May be shared</option>
+                            </select>
+
+                            {foodError && (
+                            <p className="mt-3 text-sm font-medium text-red-600">
+                                {foodError}
+                            </p>
+                            )}
+
+                            {preferredFoodTypes.length > 0 && (
+                            <div className="mt-5 rounded-2xl border border-green-100 bg-green-50/70 p-4">
+                                <span className="inline-flex rounded-full bg-green-100 px-3 py-1 text-sm font-semibold text-green-700">
+                                Fixed selection confirmed
+                                </span>
+                                <p className="mt-3 text-sm leading-6 text-gray-800">
+                                {preferredFoodTypes.map(foodTypeLabel).join(", ")}
+                                </p>
                             </div>
                             )}
                         </section>
