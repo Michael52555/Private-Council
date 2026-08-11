@@ -9,6 +9,7 @@ import {
 import { runSingleFlight } from "@/lib/menu/singleflight";
 import { hasReliableMealEstimate } from "@/lib/menu/meal-estimate";
 import { classifyMenuItem } from "@/lib/menu/meal-composition";
+import { activeProviderAdapterForUrl } from "@/lib/menu/adapters";
 import type { OrderingSource, RestaurantMealProfile } from "@/lib/menu/types";
 
 export const runtime = "nodejs";
@@ -46,9 +47,13 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "At least one ordering source is required." }, { status: 400 });
     }
 
-    // Keep Google Maps' provider order and allow the extractor to try the next
-    // supported provider only when a higher-listed source has no reliable menu.
-    const sources = body.sources.filter(isOrderingSource).slice(0, 3);
+    // Reject stale client/discovery-cache sources for providers that are not in
+    // the current live allowlist. DoorDash remains implemented but inactive;
+    // production extraction currently accepts Grubhub only.
+    const sources = body.sources
+      .filter(isOrderingSource)
+      .filter((source) => Boolean(activeProviderAdapterForUrl(source.url)))
+      .slice(0, 3);
     const retryFailed = body.retryFailed === true;
     const mealProfile: RestaurantMealProfile = body.mealProfile === "fast_food"
       ? "fast_food"
