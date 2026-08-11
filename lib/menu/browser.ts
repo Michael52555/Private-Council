@@ -657,6 +657,18 @@ type LinkCandidate = {
   text: string;
 };
 
+export function linksForActivatedOrderingMode(
+  initialLinks: LinkCandidate[],
+  deliveryLinks: LinkCandidate[],
+  deliveryModeActivated: boolean,
+): LinkCandidate[] {
+  if (!deliveryModeActivated) return initialLinks;
+  return deliveryLinks.map((link) => ({
+    ...link,
+    text: `${link.text} Delivery`.trim(),
+  }));
+}
+
 type ClickableCandidate = {
   locator: Locator;
   label: string;
@@ -935,7 +947,7 @@ async function collectOrderingModeLinks(
   const surface = dialogVisible
     ? page.locator('[role="dialog"]:visible, [aria-modal="true"]:visible').last()
     : page.locator("body");
-  const collected = await (dialogVisible
+  const initialLinks = await (dialogVisible
     ? collectLinks(surface).catch(() => [] as LinkCandidate[])
     : collectPageLinks(page));
 
@@ -943,18 +955,19 @@ async function collectOrderingModeLinks(
     page,
     surface,
   ).catch(() => false);
-  if (deliveryModeActivated) {
-    const deliveryLinks = dialogVisible
+  const deliveryLinks = deliveryModeActivated
+    ? dialogVisible
       ? await collectLinks(surface).catch(() => [] as LinkCandidate[])
-      : await collectPageLinks(page);
-    collected.push(
-      ...deliveryLinks.map((link) => ({
-        ...link,
-        text: `${link.text} Delivery`.trim(),
-      })),
-    );
-  }
-  return { links: collected, deliveryModeActivated };
+      : await collectPageLinks(page)
+    : [];
+  return {
+    links: linksForActivatedOrderingMode(
+      initialLinks,
+      deliveryLinks,
+      deliveryModeActivated,
+    ),
+    deliveryModeActivated,
+  };
 }
 
 function normalizedHref(rawUrl: string): string | null {
