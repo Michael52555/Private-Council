@@ -25,7 +25,7 @@ test("uses only delivery links after the Google ordering panel switches modes", 
     selectSupportedOrderingLinks(
       linksForActivatedOrderingMode(pickup, delivery, true),
     ).map((candidate) => candidate.text),
-    ["Grubhub Delivery", "DoorDash Delivery"],
+    ["Grubhub Delivery"],
   );
 });
 
@@ -74,14 +74,14 @@ test("recognizes the Chinese online-order control but rejects sponsored order ad
   assert.equal(scoreGoogleOrderControlLabel("立即订餐 · 广告主: GrubHub, Inc."), -1);
 });
 
-test("selects the first Grubhub or DoorDash provider in Google list order", () => {
+test("skips DoorDash and selects Grubhub while DoorDash is paused", () => {
   const selected = selectFirstSupportedOrderingLink([
     { href: "https://pressed.com/order", text: "Pressed" },
     { href: "https://www.doordash.com/store/pressed-123", text: "DoorDash" },
     { href: "https://www.grubhub.com/restaurant/pressed-123", text: "Grubhub" },
   ]);
 
-  assert.equal(selected?.href, "https://www.doordash.com/store/pressed-123");
+  assert.equal(selected?.href, "https://www.grubhub.com/restaurant/pressed-123");
 });
 
 test("selects only the first Grubhub link when Google exposes variants", () => {
@@ -93,7 +93,7 @@ test("selects only the first Grubhub link when Google exposes variants", () => {
   assert.equal(selected?.href, "https://www.grubhub.com/restaurant/subway-delivery");
 });
 
-test("keeps the first link for each supported provider in Google list order", () => {
+test("keeps only the first Grubhub link while DoorDash is paused", () => {
   const selected = selectSupportedOrderingLinks([
     { href: "https://pressed.com/order", text: "Pressed" },
     { href: "https://www.pandaexpress.com/location", text: "Panda pickup" },
@@ -104,7 +104,6 @@ test("keeps the first link for each supported provider in Google list order", ()
   ]);
 
   assert.deepEqual(selected.map((candidate) => candidate.text), [
-    "DoorDash delivery",
     "Grubhub delivery",
   ]);
 });
@@ -130,12 +129,11 @@ test("skips chain websites and unsupported delivery platforms", () => {
   ]);
 
   assert.deepEqual(selected.map((candidate) => candidate.text), [
-    "DoorDash delivery",
     "Grubhub delivery",
   ]);
   assert.equal(
     selectFirstSupportedOrderingLink(selected)?.text,
-    "DoorDash delivery",
+    "Grubhub delivery",
   );
 });
 
