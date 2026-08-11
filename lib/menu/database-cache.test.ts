@@ -137,7 +137,7 @@ test("bypasses restaurant cache reads and writes when debugging is enabled", () 
 });
 
 test("the central database keeps the first reliable menu result", () => {
-  const orderingSource = source("https://doordash.com/store/123", "doordash");
+  const orderingSource = source("https://grubhub.com/restaurant/123", "grubhub");
   const result = (median: number): RestaurantMenuResult => ({
     placeId: "place-first-result",
     restaurantName: "Cache Test",
@@ -179,7 +179,7 @@ test("the central database keeps the first reliable menu result", () => {
 });
 
 test("recomputes cached unit-item menus with the current basket estimator", () => {
-  const orderingSource = source("https://doordash.com/store/kiyo", "doordash");
+  const orderingSource = source("https://grubhub.com/restaurant/kiyo", "grubhub");
   const staleResult: RestaurantMenuResult = {
     placeId: "place-kiyo",
     restaurantName: "Kiyo Sushi & Sake",
@@ -213,6 +213,18 @@ test("recomputes cached unit-item menus with the current basket estimator", () =
     assert.equal(cached.result.priceSummary.median, 18.75);
   }
   assert.equal(readSuccessfulMenuCacheBatch(["place-kiyo"]).size, 1);
+});
+
+test("does not reuse a successful DoorDash menu while DoorDash is paused", () => {
+  const doorDash = source("https://doordash.com/store/paused", "doordash");
+  storeMenuSuccessOnce(
+    "place-paused-doordash",
+    [doorDash],
+    bowlResult("place-paused-doordash", [12, 14, 16]),
+  );
+
+  assert.equal(readMenuCache("place-paused-doordash", [doorDash]).status, "miss");
+  assert.equal(readSuccessfulMenuCacheBatch(["place-paused-doordash"]).size, 0);
 });
 
 test("migrates an older successful raw menu before honoring a newer failure", () => {
