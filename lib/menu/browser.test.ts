@@ -3,12 +3,31 @@ import test from "node:test";
 import {
   isDeliveryOrderingModeLabel,
   isProviderVerificationPage,
+  linksForActivatedOrderingMode,
   providerStartUrl,
   scoreGoogleOrderControlLabel,
   selectFirstSupportedOrderingLink,
   selectGoogleOrderingLinkCandidates,
   selectSupportedOrderingLinks,
 } from "@/lib/menu/browser";
+
+test("uses only delivery links after the Google ordering panel switches modes", () => {
+  const pickup = [
+    { href: "https://www.doordash.com/store/movita-1316796?pickup=true", text: "DoorDash" },
+    { href: "https://www.grubhub.com/restaurant/movita/11035440?pickup=true", text: "Grubhub" },
+  ];
+  const delivery = [
+    { href: "https://www.grubhub.com/restaurant/movita/11035440?delivery=true", text: "Grubhub" },
+    { href: "https://www.doordash.com/store/movita-1316796", text: "DoorDash" },
+  ];
+
+  assert.deepEqual(
+    selectSupportedOrderingLinks(
+      linksForActivatedOrderingMode(pickup, delivery, true),
+    ).map((candidate) => candidate.text),
+    ["Grubhub Delivery", "DoorDash Delivery"],
+  );
+});
 
 test("recognizes DoorDash browser-verification interstitials", () => {
   assert.equal(isProviderVerificationPage("Just a moment...", ""), true);
