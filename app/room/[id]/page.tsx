@@ -195,11 +195,11 @@ function isPreferenceCategory(
 }
 
 const importanceLabels: Record<Importance, string> = {
-  1: "Almost indifferent",
-  2: "Soft preference",
-  3: "Open to compromise",
-  4: "Strict",
-  5: "Non-negotiable",
+  1: "Flexible",
+  2: "Nice to have",
+  3: "Preferred",
+  4: "Strong preference",
+  5: "Must match",
 };
 
 const visibilityLabels: Record<Visibility, string> = {
@@ -1855,7 +1855,7 @@ export default function RoomPage() {
                             htmlFor="preference-visibility"
                             className="mb-2 block text-sm font-semibold text-gray-800"
                         >
-                            Visibility
+                            Who can see this?
                         </label>
 
                         <select
@@ -1884,11 +1884,34 @@ export default function RoomPage() {
                     {/* Fixed food-type input or free statement for other categories */}
                     {draft.category === "food" ? (
                     <div className="mt-5">
-                        <p className="mb-2 block text-sm font-semibold text-gray-800">
-                        Choose one or more food types
+                        <div className="flex min-h-8 items-center justify-between gap-3">
+                        <div>
+                            <p className="text-sm font-semibold text-gray-800">
+                            What sounds good?
+                            </p>
+                            <p className="mt-1 text-sm text-gray-500">
+                            Select every food type you would be happy with.
+                            </p>
+                        </div>
+
+                        {draft.foodTypes.length > 0 && (
+                            <button
+                            type="button"
+                            onClick={() => updateDraft("foodTypes", [])}
+                            className="shrink-0 text-sm font-semibold text-purple-700 transition hover:text-purple-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-500 focus-visible:ring-offset-2"
+                            >
+                            Clear all
+                            </button>
+                        )}
+                        </div>
+
+                        <p className="mt-3 text-sm font-medium text-gray-600" aria-live="polite">
+                        {draft.foodTypes.length === 0
+                            ? "Nothing selected yet"
+                            : `${draft.foodTypes.length} selected`}
                         </p>
 
-                        <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+                        <div className="mt-3 grid grid-cols-2 gap-2 md:grid-cols-4">
                         {FOOD_TYPE_OPTIONS.map((option) => {
                             const selected = draft.foodTypes.includes(option.value);
                             return (
@@ -1905,12 +1928,17 @@ export default function RoomPage() {
                                 );
                                 setFormError("");
                                 }}
-                                className={`rounded-xl border px-3 py-3 text-sm font-semibold transition ${
+                                className={`flex min-h-11 items-center justify-center gap-2 rounded-xl border px-3 py-2.5 text-sm font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-500 focus-visible:ring-offset-2 ${
                                 selected
-                                    ? "border-purple-600 bg-purple-600 text-white"
+                                    ? "border-purple-600 bg-purple-600 text-white shadow-sm"
                                     : "border-gray-200 bg-gray-50 text-gray-700 hover:border-purple-300 hover:bg-purple-50"
                                 }`}
                             >
+                                {selected && (
+                                <span aria-hidden="true" className="text-base leading-none">
+                                    &#10003;
+                                </span>
+                                )}
                                 {option.label}
                             </button>
                             );
@@ -1949,7 +1977,7 @@ export default function RoomPage() {
                     {/* Importance selection */}
                     <fieldset className="mt-5">
                         <legend className="text-sm font-semibold text-gray-800">
-                        How important is this?
+                        How much should this affect recommendations?
                         </legend>
 
                         <div className="mt-3 grid grid-cols-5 gap-2">
@@ -1963,6 +1991,8 @@ export default function RoomPage() {
                                 onClick={() =>
                                 updateDraft("importance", importance)
                                 }
+                                aria-label={`${importance}: ${importanceLabels[importance]}`}
+                                aria-pressed={selected}
                                 className={`rounded-2xl border py-3 font-semibold transition ${
                                 selected
                                     ? "border-purple-600 bg-purple-600 text-white"
@@ -1973,6 +2003,11 @@ export default function RoomPage() {
                             </button>
                             );
                         })}
+                        </div>
+
+                        <div className="mt-2 flex justify-between text-xs font-medium text-gray-500">
+                        <span>Flexible</span>
+                        <span>Must match</span>
                         </div>
 
                         <p className="mt-3 text-sm font-medium text-purple-700">
