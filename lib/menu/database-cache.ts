@@ -12,12 +12,12 @@ import {
   summarizeTypicalMealPrices,
 } from "@/lib/menu/meal-estimate";
 
-const orderingSchemaVersion = 9;
+const orderingSchemaVersion = 10;
 // Kept only for reading the pre-split cache during the automatic migration.
 export const menuSchemaVersion = 4;
-const menuAttemptVersion = 16;
+const menuAttemptVersion = 17;
 const rawMenuSchemaVersion = 1;
-export const mealEstimatorVersion = 2;
+export const mealEstimatorVersion = 3;
 const orderingSuccessLifetimeMs = 14 * 24 * 60 * 60 * 1000;
 const orderingEmptyLifetimeMs = 5 * 60 * 1000;
 const failureRetryMs = 3 * 60 * 60 * 1000;
@@ -283,18 +283,21 @@ function readOrMigrateRawMenu(placeId: string): SuccessfulMenuCacheValue | null 
   return readRawMenu(placeId) ?? migrateLegacyMenuSuccess(placeId);
 }
 
-function normalizeHostname(source: OrderingSource): string {
+function normalizedSourceIdentity(source: OrderingSource): string {
   try {
-    return new URL(source.url).hostname.toLowerCase().replace(/^www\./, "");
+    const url = new URL(source.url);
+    const hostname = url.hostname.toLowerCase().replace(/^www\./, "");
+    const pathname = url.pathname.replace(/\/+$/, "") || "/";
+    return `${hostname}${pathname}:${source.fulfillment}`;
   } catch {
-    return source.provider;
+    return `${source.provider}:${source.fulfillment}`;
   }
 }
 
 export function menuSourceFingerprint(sources: OrderingSource[]): string {
   const providers = sources
     .slice(0, 3)
-    .map((source) => `${source.provider}:${normalizeHostname(source)}`)
+    .map((source) => `${source.provider}:${normalizedSourceIdentity(source)}`)
     .join("|");
   return `attempt-v${menuAttemptVersion}|${providers}`;
 }
