@@ -36,8 +36,8 @@ test("leaves unsupported first-party providers out of the adapter registry", () 
   assert.equal(menuAdapterForControlLabel("pressed.com Merchant website"), undefined);
 });
 
-test("uses an explicit Grubhub and DoorDash allowlist for unified discovery", () => {
-  assert.deepEqual(ACTIVE_PROVIDER_ADAPTER_IDS, ["grubhub", "doordash"]);
+test("uses a Grubhub-only allowlist while DoorDash is paused", () => {
+  assert.deepEqual(ACTIVE_PROVIDER_ADAPTER_IDS, ["grubhub"]);
   assert.equal(
     activeProviderAdapterForUrl("https://www.grubhub.com/restaurant/example")?.id,
     "grubhub",
@@ -47,12 +47,12 @@ test("uses an explicit Grubhub and DoorDash allowlist for unified discovery", ()
     "grubhub",
   );
   assert.equal(
-    activeProviderAdapterForUrl("https://www.doordash.com/store/example")?.id,
-    "doordash",
+    activeProviderAdapterForUrl("https://www.doordash.com/store/example"),
+    undefined,
   );
   assert.equal(
-    activeProviderAdapterForControlLabel("Order with DoorDash")?.id,
-    "doordash",
+    activeProviderAdapterForControlLabel("Order with DoorDash"),
+    undefined,
   );
   assert.equal(
     activeProviderAdapterForUrl("https://order.chick-fil-a.com/load-dot-com"),
