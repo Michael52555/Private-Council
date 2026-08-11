@@ -62,6 +62,8 @@ const SECTION_COMPLETE_PATTERN = /^(?:combos?|combinations?|meals?|meal deals?|b
 const SECTION_SMALL_PATTERN = /^(?:appetizers?|starters?|small plates?|tapas|dim\s*sum|snacks?|mezze)$/i;
 const SECTION_UNIT_PATTERN = /^(?:tacos?|nigiri|sashimi|hand rolls?|sushi rolls?|maki|dumplings?|gyoza|bao|sliders?)$/i;
 const SECTION_MAIN_PATTERN = /^(?:mains?|entrées?|entrees?|burgers?|sandwiches?|wraps?|pizza|ramen|udon|noodles?|pasta|curr(?:y|ies)|bowls?|salads?)$/i;
+const STANDALONE_BEVERAGE_RESTAURANT_PATTERN = /\b(?:juice bars?|smoothie (?:bars?|shops?)|smoothies? and juices?|a[cç]a[ií] (?:bars?|shops?))\b/i;
+const WELLNESS_SHOT_SECTION_PATTERN = /^(?:wellness |ginger |turmeric |beet |hibiscus )?shots?$/i;
 
 const PATTERN_KEYWORDS: Record<BasketFamily, Array<[RegExp, number]>> = {
   single: [
@@ -125,6 +127,34 @@ export function classifyMenuItem(item: MenuItem): MenuItemRole {
   if (UNIT_ITEM_PATTERN.test(name)) return "unit_item";
   if (MAIN_PATTERN.test(name)) return "main";
   return "unknown";
+}
+
+function isStandaloneBeverageRestaurant(
+  context: MealCompositionContext,
+): boolean {
+  return STANDALONE_BEVERAGE_RESTAURANT_PATTERN.test(
+    [context.restaurantName, ...(context.restaurantTags ?? [])]
+      .map(normalized)
+      .filter(Boolean)
+      .join(" "),
+  );
+}
+
+function classifyMenuItemForContext(
+  item: MenuItem,
+  context: MealCompositionContext,
+): MenuItemRole {
+  const section = normalized(item.section);
+  if (WELLNESS_SHOT_SECTION_PATTERN.test(section)) return "accessory";
+  const role = classifyMenuItem(item);
+  if (
+    role === "drink" &&
+    isStandaloneBeverageRestaurant(context) &&
+    /\b(?:smoothies?|juices?)\b/i.test(`${section} ${normalized(item.name)}`)
+  ) {
+    return "main";
+  }
+  return role;
 }
 
 function quantile(values: number[], ratio: number): number {
@@ -353,7 +383,7 @@ export function estimateMealComposition(
   const roles = new Map<string, MenuItemRole>();
   const byRole = new Map<MenuItemRole, Array<MenuItem & { price: number }>>();
   for (const item of priced) {
-    const role = classifyMenuItem(item);
+    const role = classifyMenuItemForContext(item, context);
     roles.set(item.id, role);
     const roleItems = byRole.get(role) ?? [];
     roleItems.push(item);
@@ -367,6 +397,17 @@ export function estimateMealComposition(
   const unitItems = roleItems("unit_item");
   const unknownMains = unknownMainCandidates(roleItems("unknown"), priced, context);
   const scores = basketScores(priced, roles, context);
+
+  // At a juice/smoothie bar, the beverage or bowl is normally the purchased
+  // one-person item rather than an optional drink added to another entree.
+  // Branded Best Sellers often omit words such as "smoothie" from their names,
+  // so the restaurant identity is needed as the final single-item signal.
+  if (
+    isStandaloneBeverageRestaurant(context) &&
+    regularMains.length + unknownMains.length >= 2
+  ) {
+    scores.single += 10;
+  }
 
   // Existing Google fast-food labels are only a weak tie-breaker. The menu and
   // Provider tags remain the primary evidence.
