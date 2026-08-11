@@ -22,13 +22,17 @@ const cachePath = join(
 );
 process.env.RESTAURANT_CACHE_DB_PATH = cachePath;
 
-function source(url: string, provider: OrderingSource["provider"]): OrderingSource {
+function source(
+  url: string,
+  provider: OrderingSource["provider"],
+  fulfillment: OrderingSource["fulfillment"] = "pickup",
+): OrderingSource {
   return {
     id: url,
     provider,
     label: provider,
     url,
-    fulfillment: "pickup",
+    fulfillment,
     discoveredFrom: "google_maps",
   };
 }
@@ -71,6 +75,15 @@ test("menu source fingerprint records provider changes for diagnostics", () => {
   const doorDash = source("https://doordash.com/store/123", "doordash");
   const toast = source("https://order.toasttab.com/online/store", "toast");
   assert.notEqual(menuSourceFingerprint([doorDash]), menuSourceFingerprint([toast]));
+});
+
+test("menu source fingerprint distinguishes restaurant paths and fulfillment modes", () => {
+  const firstStore = source("https://www.grubhub.com/restaurant/movita/11035440?utm_source=google", "grubhub", "delivery");
+  const otherStore = source("https://www.grubhub.com/restaurant/movita/2448266", "grubhub", "delivery");
+  const pickup = source("https://www.grubhub.com/restaurant/movita/11035440?pickup=true", "grubhub", "pickup");
+
+  assert.notEqual(menuSourceFingerprint([firstStore]), menuSourceFingerprint([otherStore]));
+  assert.notEqual(menuSourceFingerprint([firstStore]), menuSourceFingerprint([pickup]));
 });
 
 test("invalidates a negative menu cache when the provider inputs change", () => {
