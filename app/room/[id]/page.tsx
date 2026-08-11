@@ -10,6 +10,11 @@ import type {
   CandidatePlan,
   RoomConfig,
   LocalAgentState,
+  FoodType,
+} from "@/lib/planning-types";
+import {
+  FOOD_TYPE_OPTIONS,
+  foodTypeLabel,
 } from "@/lib/planning-types";
 import type {
   OrderingDiscoveryDiagnostics,
@@ -38,6 +43,7 @@ type StructuredPreferenceData = {
   maxDistanceMiles?: number;
   minPriceDollarsPerPerson?: number;
   maxPriceDollarsPerPerson?: number;
+  preferredFoodTypes?: FoodType[];
 };
 
 type DistanceInterpretationApiResult =
@@ -99,6 +105,7 @@ type BudgetInterpretationApiResult =
 type PreferenceDraft = {
   category: PreferenceCategory;
   statement: string;
+  foodTypes: FoodType[];
   importance: Importance;
   visibility: Visibility;
 };
@@ -168,7 +175,7 @@ const categoryLabels: Record<PreferenceCategory, string> = {
   location: "Location",
   distance: "Distance",
   transportation: "Transportation",
-  food: "Food & allergies",
+  food: "Food type",
   budget: "Budget",
   departure_time: "Departure time",
   return_time: "Return time",
@@ -204,6 +211,7 @@ const visibilityLabels: Record<Visibility, string> = {
 const emptyDraft: PreferenceDraft = {
   category: "location",
   statement: "",
+  foodTypes: [],
   importance: 3,
   visibility: "private",
 };
@@ -707,6 +715,26 @@ function renderPreferenceDetails(preference: Preference) {
       }
 
       return null;
+
+    case "food": {
+      const preferredFoodTypes = data?.preferredFoodTypes;
+      if (!Array.isArray(preferredFoodTypes) || preferredFoodTypes.length === 0) {
+        return null;
+      }
+
+      return (
+        <div className="mt-3 flex flex-wrap gap-2">
+          {preferredFoodTypes.map((foodType) => (
+            <span
+              key={foodType}
+              className="rounded-full bg-purple-100 px-3 py-1 text-sm font-semibold text-purple-700"
+            >
+              {foodTypeLabel(foodType)}
+            </span>
+          ))}
+        </div>
+      );
+    }
 
 
     default:
@@ -1238,12 +1266,33 @@ export default function RoomPage() {
   ) {
     event.preventDefault();
 
-    const trimmedStatement = draft.statement.trim();
+    const foodTypeNames = draft.foodTypes.map(foodTypeLabel);
+    const trimmedStatement = draft.category === "food"
+      ? foodTypeNames.join(", ")
+      : draft.statement.trim();
 
     if (!trimmedStatement) {
-      setFormError("Please describe what matters to you.");
+      setFormError(
+        draft.category === "food"
+          ? "Select at least one food type."
+          : "Please describe what matters to you.",
+      );
       return;
     }
+
+    const fixedFoodInterpretation: PreferenceInterpretation | undefined =
+      draft.category === "food"
+        ? {
+            status: "success",
+            summary: `Preferred food types: ${foodTypeNames.join(", ")}`,
+            structuredData: {
+              preferredFoodTypes: draft.foodTypes,
+            },
+            clarificationQuestion: null,
+            source: "fixed",
+            confirmed: true,
+          }
+        : undefined;
 
     setFormError("");
 
@@ -1267,8 +1316,11 @@ export default function RoomPage() {
           statement:trimmedStatement,
           importance:draft.importance,
           visibility:draft.visibility,
-          interpretation: 
-            preference.interpretation,
+          interpretation:
+            fixedFoodInterpretation ??
+            (preference.category === draft.category
+              ? preference.interpretation
+              : undefined),
         };
       })
     );
@@ -1279,6 +1331,7 @@ export default function RoomPage() {
         statement: trimmedStatement,
         importance: draft.importance,
         visibility: draft.visibility,
+        interpretation: fixedFoodInterpretation,
       };
 
       setPreferences((currentPreferences) => [
@@ -1633,6 +1686,8 @@ export default function RoomPage() {
     setDraft({
       category: preference.category,
       statement: preference.statement,
+      foodTypes:
+        preference.interpretation?.structuredData.preferredFoodTypes ?? [],
       importance: preference.importance,
       visibility: preference.visibility,
     });
@@ -1826,7 +1881,43 @@ export default function RoomPage() {
                     </div>
 
                 
-                    {/* Preference statement */}
+                    {/* Fixed food-type input or free statement for other categories */}
+                    {draft.category === "food" ? (
+                    <div className="mt-5">
+                        <p className="mb-2 block text-sm font-semibold text-gray-800">
+                        Choose one or more food types
+                        </p>
+
+                        <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+                        {FOOD_TYPE_OPTIONS.map((option) => {
+                            const selected = draft.foodTypes.includes(option.value);
+                            return (
+                            <button
+                                key={option.value}
+                                type="button"
+                                aria-pressed={selected}
+                                onClick={() => {
+                                updateDraft(
+                                    "foodTypes",
+                                    selected
+                                    ? draft.foodTypes.filter((value) => value !== option.value)
+                                    : [...draft.foodTypes, option.value],
+                                );
+                                setFormError("");
+                                }}
+                                className={`rounded-xl border px-3 py-3 text-sm font-semibold transition ${
+                                selected
+                                    ? "border-purple-600 bg-purple-600 text-white"
+                                    : "border-gray-200 bg-gray-50 text-gray-700 hover:border-purple-300 hover:bg-purple-50"
+                                }`}
+                            >
+                                {option.label}
+                            </button>
+                            );
+                        })}
+                        </div>
+                    </div>
+                    ) : (
                     <div className="mt-5">
                         <label
                         htmlFor="preference"
@@ -1841,16 +1932,17 @@ export default function RoomPage() {
                         onChange={(event) =>
                             updateDraft("statement", event.target.value)
                         }
-                        placeholder="For example: I would prefer Japanese food"
+                        placeholder="Describe what matters to you"
                         className="w-full rounded-2xl border border-gray-300 bg-gray-50 px-4 py-3 text-gray-900 outline-none transition placeholder:text-gray-400 focus:border-purple-500 focus:bg-white focus:ring-4 focus:ring-purple-100"
                         />
-
-                        {formError && (
-                        <p className="mt-2 text-sm text-red-600">
-                            {formError}
-                        </p>
-                        )}
                     </div>
+                    )}
+
+                    {formError && (
+                    <p className="mt-2 text-sm text-red-600">
+                        {formError}
+                    </p>
+                    )}
 
                         
 
