@@ -11,11 +11,15 @@ import {
   hasReliableMealEstimate,
   summarizeTypicalMealPrices,
 } from "@/lib/menu/meal-estimate";
+import {
+  ACTIVE_PROVIDER_ADAPTER_IDS,
+  activeProviderAdapterForUrl,
+} from "@/lib/menu/adapters";
 
-const orderingSchemaVersion = 10;
+const orderingSchemaVersion = 11;
 // Kept only for reading the pre-split cache during the automatic migration.
 export const menuSchemaVersion = 4;
-const menuAttemptVersion = 17;
+const menuAttemptVersion = 18;
 const rawMenuSchemaVersion = 1;
 export const mealEstimatorVersion = 3;
 const orderingSuccessLifetimeMs = 14 * 24 * 60 * 60 * 1000;
@@ -168,13 +172,34 @@ function pricedItemCount(result: RestaurantMenuResult): number {
   ).length;
 }
 
+function activeProviderPricedItemCount(result: RestaurantMenuResult): number {
+  return result.menus.reduce((count, menu) => {
+    if (!activeProviderAdapterForUrl(menu.source.url)) return count;
+    return count + menu.items.filter(
+      (item) => typeof item.price === "number" && Number.isFinite(item.price),
+    ).length;
+  }, 0);
+}
+
+function sourceFingerprintHasActiveProvider(value: unknown): boolean {
+  if (typeof value !== "string") return false;
+  return ACTIVE_PROVIDER_ADAPTER_IDS.some((adapterId) =>
+    value.includes(`|${adapterId}:`),
+  );
+}
+
 function resultFromRawRow(
   placeId: string,
   row: Record<string, unknown>,
 ): SuccessfulMenuCacheValue | null {
   if (typeof row.stored_at !== "string") return null;
   const rawResult = parseJson<RestaurantMenuResult>(row.result_json);
-  if (!rawResult || pricedItemCount(rawResult) === 0) return null;
+  if (
+    !rawResult ||
+    pricedItemCount(rawResult) === 0 ||
+    (!sourceFingerprintHasActiveProvider(row.source_fingerprint) &&
+      activeProviderPricedItemCount(rawResult) === 0)
+  ) return null;
 
   const revision = typeof row.raw_revision === "string"
     ? row.raw_revision
@@ -214,7 +239,7 @@ function resultFromRawRow(
 
 function readRawMenu(placeId: string): SuccessfulMenuCacheValue | null {
   const row = database().prepare(`
-    SELECT raw_revision, result_json, stored_at
+    SELECT source_fingerprint, raw_revision, result_json, stored_at
     FROM restaurant_raw_menu_cache
     WHERE place_id = ? AND raw_schema_version = ?
   `).get(placeId, rawMenuSchemaVersion) as Record<string, unknown> | undefined;
@@ -266,6 +291,8 @@ function migrateLegacyMenuSuccess(placeId: string): SuccessfulMenuCacheValue | n
     if (
       !result ||
       pricedItemCount(result) === 0 ||
+      (!sourceFingerprintHasActiveProvider(row.source_fingerprint) &&
+        activeProviderPricedItemCount(result) === 0) ||
       typeof row.stored_at !== "string"
     ) continue;
     storeRawMenu(
@@ -462,25 +489,33 @@ export function storeMenuSuccessOnce(
 ): void {
   if (isRestaurantCacheDisabled()) return;
   const existingRow = database().prepare(`
-    SELECT result_json
+    SELECT source_fingerprint, result_json
     FROM restaurant_raw_menu_cache
     WHERE place_id = ? AND raw_schema_version = ?
   `).get(placeId, rawMenuSchemaVersion) as Record<string, unknown> | undefined;
   const existingResult = parseJson<RestaurantMenuResult>(existingRow?.result_json);
-  const existingReliable = existingResult
+  const existingIsActive = existingResult
+    ? sourceFingerprintHasActiveProvider(existingRow?.source_fingerprint) ||
+      activeProviderPricedItemCount(existingResult) > 0
+    : false;
+  const freshSourceFingerprint = menuSourceFingerprint(sources);
+  const freshIsActive = sourceFingerprintHasActiveProvider(freshSourceFingerprint);
+  const existingReliable = existingResult && existingIsActive
     ? hasReliableMealEstimate(withCurrentPriceEstimate(existingResult).priceSummary)
     : false;
   const freshReliable = hasReliableMealEstimate(
     withCurrentPriceEstimate(result).priceSummary,
   );
   const shouldReplace =
+    freshIsActive &&
     pricedItemCount(result) > 0 &&
     (!existingResult ||
+      !existingIsActive ||
       (!existingReliable && freshReliable) ||
       (!existingReliable && pricedItemCount(result) > pricedItemCount(existingResult)));
 
   if (shouldReplace) {
-    storeRawMenu(placeId, menuSourceFingerprint(sources), result);
+    storeRawMenu(placeId, freshSourceFingerprint, result);
   }
   if (existingReliable || freshReliable) {
     database().prepare(`
