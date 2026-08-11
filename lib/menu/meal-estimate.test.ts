@@ -244,6 +244,47 @@ test("uses Grubhub bowl tags to recognize branded Best Sellers and exclude smoot
   assert.equal(mealEstimateConfidence(summary), "medium");
 });
 
+test("treats Movita Juice Bar Best Sellers as one-person products", () => {
+  const summary = summarizeTypicalMealPrices(
+    [
+      item("original", "MR ORIGINAL", 13.21, "Best Sellers"),
+      item("moringa", "GREENEX MORINGA", 13.74, "Best Sellers"),
+      item("nutella", "NUTELLA BANANA", 13.21, "Best Sellers"),
+      item("mango", "MUCHO MANGO", 12.06, "Best Sellers"),
+      item("strawberry", "STRAWBERRY BANANA", 12.06, "Best Sellers"),
+      item("oatmeal", "WARM OATMEAL", 8.04, "Best Sellers"),
+    ],
+    { restaurantName: "Movita Juice Bar", mealProfile: "sit_down" },
+  );
+
+  assert.equal(summary.mealPattern, "single_main");
+  assert.equal(summary.lowerQuartile, 12.06);
+  assert.equal(summary.median, 12.64);
+  assert.equal(summary.upperQuartile, 13.21);
+  assert.equal(summary.sampleItemCount, 6);
+  assert.equal(mealEstimateConfidence(summary), "medium");
+});
+
+test("uses one smoothie at a juice bar and excludes wellness shots", () => {
+  const summary = summarizeTypicalMealPrices(
+    [
+      item("smoothie-1", "Peanut Butter Banana", 12.06, "Smoothies"),
+      item("smoothie-2", "Pineapple Mango", 12.64, "Smoothies"),
+      item("juice", "Greenex", 13.21, "Juices"),
+      item("shot-1", "Ginger Shot", 4.59, "Wellness Shots"),
+      item("shot-2", "Turmeric Shot", 4.59, "Wellness Shots"),
+    ],
+    { restaurantTags: ["Juice Bar", "Smoothies and Juices"] },
+  );
+
+  assert.equal(summary.mealPattern, "single_main");
+  assert.equal(summary.lowerQuartile, 12.06);
+  assert.equal(summary.median, 12.64);
+  assert.equal(summary.upperQuartile, 13.21);
+  assert.equal(summary.sampleItemCount, 3);
+  assert.equal(summary.excludedItemCount, 2);
+});
+
 test("uses full Grubhub menu tags when Best Sellers is absent", () => {
   const summary = summarizeTypicalMealPrices(
     [
