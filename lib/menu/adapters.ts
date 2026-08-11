@@ -28,7 +28,9 @@ export type MenuProviderAdapter = {
 // integrations, while preserving Google's top-to-bottom link order.
 export const ACTIVE_PROVIDER_ADAPTER_IDS = [
   "grubhub",
-  "doordash",
+  // DoorDash remains in MENU_PROVIDER_ADAPTERS so its scraper can be repaired
+  // and re-enabled later. It is deliberately excluded from live discovery for
+  // now because its browser-verification page is not reliable enough.
 ] as const satisfies readonly MenuAdapterId[];
 
 const activeProviderAdapterIds = new Set<MenuAdapterId>(
