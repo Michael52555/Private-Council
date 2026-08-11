@@ -120,6 +120,20 @@ const sectionLabels: Record<SetupSection, string> = {
   other: "Something else",
 };
 
+const importanceLabels: Record<Importance, string> = {
+  1: "Flexible",
+  2: "Nice to have",
+  3: "Preferred",
+  4: "Strong preference",
+  5: "Must match",
+};
+
+const visibilityDescriptions: Record<Visibility, string> = {
+  private: "Only your local agent uses this preference.",
+  anonymous: "The group can use it without seeing that it came from you.",
+  shareable: "This preference may be shown to other people in the room.",
+};
+
 
 
 const modeDefaults: Record<PlanningMode, SetupSection[]> = {
@@ -1286,14 +1300,35 @@ export default function SetupPage() {
                             </p>
 
                             <h3 className="mt-2 text-xl font-semibold text-gray-950">
-                            What kinds of food would you like?
+                            What sounds good?
                             </h3>
 
                             <p className="mt-2 text-sm leading-6 text-gray-500">
-                            Choose one or more. These are saved as a confirmed fixed preference.
+                            Select every food type you would be happy with. You can change this later.
                             </p>
 
-                            <div className="mt-5 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+                            <div className="mt-5 flex min-h-8 items-center justify-between gap-3">
+                            <p
+                                className="text-sm font-medium text-gray-600"
+                                aria-live="polite"
+                            >
+                                {preferredFoodTypes.length === 0
+                                ? "Nothing selected yet"
+                                : `${preferredFoodTypes.length} selected`}
+                            </p>
+
+                            {preferredFoodTypes.length > 0 && (
+                                <button
+                                type="button"
+                                onClick={() => setPreferredFoodTypes([])}
+                                className="text-sm font-semibold text-purple-700 transition hover:text-purple-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-500 focus-visible:ring-offset-2"
+                                >
+                                Clear all
+                                </button>
+                            )}
+                            </div>
+
+                            <div className="mt-3 grid grid-cols-2 gap-2 md:grid-cols-4">
                             {FOOD_TYPE_OPTIONS.map((option) => {
                                 const selected = preferredFoodTypes.includes(option.value);
                                 return (
@@ -1309,12 +1344,17 @@ export default function SetupPage() {
                                     );
                                     setFoodError("");
                                     }}
-                                    className={`rounded-xl border px-3 py-3 text-sm font-semibold transition ${
+                                    className={`flex min-h-11 items-center justify-center gap-2 rounded-xl border px-3 py-2.5 text-sm font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-500 focus-visible:ring-offset-2 ${
                                     selected
-                                        ? "border-purple-600 bg-purple-600 text-white"
+                                        ? "border-purple-600 bg-purple-600 text-white shadow-sm"
                                         : "border-gray-200 bg-gray-50 text-gray-700 hover:border-purple-300 hover:bg-purple-50"
                                     }`}
                                 >
+                                    {selected && (
+                                    <span aria-hidden="true" className="text-base leading-none">
+                                        &#10003;
+                                    </span>
+                                    )}
                                     {option.label}
                                 </button>
                                 );
@@ -1323,7 +1363,7 @@ export default function SetupPage() {
 
                             <fieldset className="mt-5">
                             <legend className="text-sm font-semibold text-gray-800">
-                                How important is this?
+                                How much should this affect recommendations?
                             </legend>
 
                             <div className="mt-3 grid grid-cols-5 gap-2">
@@ -1337,15 +1377,26 @@ export default function SetupPage() {
                                         ? "border-purple-600 bg-purple-600 text-white"
                                         : "border-gray-200 bg-gray-50 text-gray-700 hover:border-purple-200 hover:bg-purple-50"
                                     }`}
+                                    aria-label={`${importance}: ${importanceLabels[importance]}`}
+                                    aria-pressed={foodImportance === importance}
                                 >
                                     {importance}
                                 </button>
                                 ))}
                             </div>
+
+                            <div className="mt-2 flex justify-between text-xs font-medium text-gray-500">
+                                <span>Flexible</span>
+                                <span>Must match</span>
+                            </div>
+
+                            <p className="mt-2 text-sm font-semibold text-purple-700">
+                                {importanceLabels[foodImportance]}
+                            </p>
                             </fieldset>
 
                             <label className="mt-5 block text-sm font-semibold text-gray-800">
-                            Visibility
+                            Who can see this preference?
                             </label>
 
                             <select
@@ -1360,22 +1411,16 @@ export default function SetupPage() {
                             <option value="shareable">May be shared</option>
                             </select>
 
+                            <p className="mt-2 text-sm leading-5 text-gray-500">
+                            {visibilityDescriptions[foodVisibility]}
+                            </p>
+
                             {foodError && (
                             <p className="mt-3 text-sm font-medium text-red-600">
                                 {foodError}
                             </p>
                             )}
 
-                            {preferredFoodTypes.length > 0 && (
-                            <div className="mt-5 rounded-2xl border border-green-100 bg-green-50/70 p-4">
-                                <span className="inline-flex rounded-full bg-green-100 px-3 py-1 text-sm font-semibold text-green-700">
-                                Fixed selection confirmed
-                                </span>
-                                <p className="mt-3 text-sm leading-6 text-gray-800">
-                                {preferredFoodTypes.map(foodTypeLabel).join(", ")}
-                                </p>
-                            </div>
-                            )}
                         </section>
                         )}
                     
