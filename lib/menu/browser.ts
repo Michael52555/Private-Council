@@ -1322,7 +1322,7 @@ export async function discoverGoogleOrderingLinks(
         skippedUnsupportedControls.length > 0
       ) {
         warnings.push(
-          "Google Maps exposed ordering providers, but no supported Grubhub or DoorDash delivery source was found.",
+          "Google Maps exposed ordering providers, but no supported Grubhub delivery source was found.",
         );
       }
       warnings.push(
