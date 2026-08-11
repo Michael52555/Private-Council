@@ -363,11 +363,10 @@ function extractRestaurantTagsFromDom(html: string): string[] {
   $("body *").each((_, element) => {
     if (tags.size >= 20) return false;
     const ownText = $(element)
-      .contents()
-      .filter((__, node) => node.type === "text")
       .text()
       .replace(/\s+/g, " ")
       .trim();
+    if (ownText.length > 220) return;
     const match = ownText.match(/^(.{2,180}?)\s*(?:·|•)\s*\${1,4}$/);
     if (!match || !match[1].includes(",")) return;
     restaurantTagsFromValue(match[1]).forEach((tag) => tags.add(tag));
