@@ -28,6 +28,32 @@ export type PreferenceCategory =
   | "return_time"
   | "other";
 
+export const FOOD_TYPE_OPTIONS = [
+  { value: "american", label: "American" },
+  { value: "chinese", label: "Chinese" },
+  { value: "japanese", label: "Japanese" },
+  { value: "korean", label: "Korean" },
+  { value: "mexican", label: "Mexican" },
+  { value: "italian", label: "Italian" },
+  { value: "indian", label: "Indian" },
+  { value: "thai", label: "Thai" },
+  { value: "vietnamese", label: "Vietnamese" },
+  { value: "mediterranean", label: "Mediterranean" },
+  { value: "middle_eastern", label: "Middle Eastern" },
+  { value: "seafood", label: "Seafood" },
+  { value: "pizza", label: "Pizza" },
+  { value: "burgers", label: "Burgers" },
+  { value: "healthy", label: "Healthy" },
+  { value: "cafe_bakery", label: "Café & bakery" },
+] as const;
+
+export type FoodType = (typeof FOOD_TYPE_OPTIONS)[number]["value"];
+
+export function foodTypeLabel(foodType: FoodType): string {
+  return FOOD_TYPE_OPTIONS.find((option) => option.value === foodType)?.label
+    ?? foodType;
+}
+
 export type PreferenceInterpretation = {
   status:
     | "success"
@@ -41,13 +67,14 @@ export type PreferenceInterpretation = {
     minPriceDollarsPerPerson?: number;
     preferredPriceDollarsPerPerson?: number;
     maxPriceDollarsPerPerson?: number;
+    preferredFoodTypes?: FoodType[];
   };
 
   clarificationQuestion:
     | string
     | null;
 
-  source: "mock" | "ai";
+  source: "mock" | "ai" | "fixed";
   confirmed: boolean;
 };
 
