@@ -595,7 +595,7 @@ function BudgetEstimatePanel({ candidate }: { candidate: RestaurantCandidate }) 
         <p className="mt-2 text-[10px] leading-4 text-gray-500">
           {isQueuedForMenu
             ? "Waiting for a central scraper worker; cached restaurants bypass this queue."
-            : "Google pricing is considered only after Grubhub and DoorDash menu extraction fails."}
+            : "Google pricing is considered only after Grubhub menu extraction fails."}
         </p>
       </div>
     );
@@ -624,7 +624,7 @@ function BudgetEstimatePanel({ candidate }: { candidate: RestaurantCandidate }) 
       )}
       {candidate.budgetEstimateSource === "google_price_level" && (
         <p className="mt-2 text-[10px] leading-4 text-gray-500">
-          Grubhub and DoorDash did not produce a reliable estimate; this broad Google band is the final fallback.
+          Grubhub did not produce a reliable estimate; this broad Google band is the final fallback.
         </p>
       )}
     </div>
