@@ -40,3 +40,9 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# central restaurant cache
+.data/
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal

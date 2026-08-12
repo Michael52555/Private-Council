@@ -10,17 +10,32 @@ import type {
   CandidatePlan,
   RoomConfig,
   LocalAgentState,
+  FoodType,
 } from "@/lib/planning-types";
+import {
+  FOOD_TYPE_OPTIONS,
+  foodTypeLabel,
+} from "@/lib/planning-types";
+import type {
+  OrderingDiscoveryDiagnostics,
+  OrderingSource,
+  MenuItem,
+  RestaurantMenuResult,
+} from "@/lib/menu/types";
+import {
+  orderingSourceHostname,
+  orderingSourceInventoryLabel,
+} from "@/lib/menu/survey";
+import {
+  hasReliableMealEstimate,
+  mealEstimateConfidence,
+} from "@/lib/menu/meal-estimate";
 
 import {
-  evaluateBudgetScore,
-  evaluateDistanceScore,
   evaluateRestaurantScore,
-  combineScores,
-  importanceWeight,
 } from "@/lib/scoring";
 
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
 import { useParams, useSearchParams } from "next/navigation";
 
 type StructuredPreferenceData = {
@@ -28,6 +43,7 @@ type StructuredPreferenceData = {
   maxDistanceMiles?: number;
   minPriceDollarsPerPerson?: number;
   maxPriceDollarsPerPerson?: number;
+  preferredFoodTypes?: FoodType[];
 };
 
 type DistanceInterpretationApiResult =
@@ -89,6 +105,7 @@ type BudgetInterpretationApiResult =
 type PreferenceDraft = {
   category: PreferenceCategory;
   statement: string;
+  foodTypes: FoodType[];
   importance: Importance;
   visibility: Visibility;
 };
@@ -100,6 +117,34 @@ type GenerateCandidatesApiResponse =
   | {
       error: string;
     };
+
+type OrderingDiscoveryApiResponse =
+  | {
+      sources: OrderingSource[];
+      websiteFallbackSources: OrderingSource[];
+      warnings: string[];
+      diagnostics: OrderingDiscoveryDiagnostics;
+    }
+  | { error: string };
+
+type CandidateOrderingState = {
+  status: "loading" | "success" | "error";
+  sources: OrderingSource[];
+  websiteFallbackSources: OrderingSource[];
+  warnings: string[];
+  diagnostics?: OrderingDiscoveryDiagnostics;
+  error?: string;
+};
+
+type RestaurantMenuApiResponse = RestaurantMenuResult | {
+  error: string;
+  retryable?: boolean;
+};
+
+type CandidateMenuState =
+  | { status: "loading" }
+  | { status: "success"; result: RestaurantMenuResult }
+  | { status: "error"; error: string };
 
 type DistanceEvaluation =
   | {
@@ -130,7 +175,7 @@ const categoryLabels: Record<PreferenceCategory, string> = {
   location: "Location",
   distance: "Distance",
   transportation: "Transportation",
-  food: "Food & allergies",
+  food: "Food type",
   budget: "Budget",
   departure_time: "Departure time",
   return_time: "Return time",
@@ -150,11 +195,11 @@ function isPreferenceCategory(
 }
 
 const importanceLabels: Record<Importance, string> = {
-  1: "Almost indifferent",
-  2: "Soft preference",
-  3: "Open to compromise",
-  4: "Strict",
-  5: "Non-negotiable",
+  1: "Flexible",
+  2: "Nice to have",
+  3: "Preferred",
+  4: "Strong preference",
+  5: "Must match",
 };
 
 const visibilityLabels: Record<Visibility, string> = {
@@ -166,6 +211,7 @@ const visibilityLabels: Record<Visibility, string> = {
 const emptyDraft: PreferenceDraft = {
   category: "location",
   statement: "",
+  foodTypes: [],
   importance: 3,
   visibility: "private",
 };
@@ -275,6 +321,350 @@ function PlanningBackground() {
   );
 }
 
+// Retained as an internal diagnostic renderer, but intentionally excluded from the user UI.
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+function PrimaryMenuPanel({ state }: { state?: CandidateMenuState }) {
+  if (!state || state.status === "loading") return null;
+  if (state.status === "error") {
+    return (
+      <details className="mt-3 rounded-xl border border-white/10 bg-black/15 px-3 py-2 text-xs">
+        <summary className="flex cursor-pointer list-none items-center justify-between gap-3 text-gray-400 [&::-webkit-details-marker]:hidden">
+          <span className="font-medium">Menu data unavailable</span>
+          <span className="text-[10px] text-gray-500">View reason</span>
+        </summary>
+        <p className="mt-2 border-t border-white/10 pt-2 leading-5 text-red-200/80">
+          {state.error}
+        </p>
+      </details>
+    );
+  }
+
+  const pricedItems = state.result.items.filter(
+    (item): item is MenuItem & { price: number } =>
+      typeof item.price === "number",
+  );
+  const sampleItemIds = new Set(state.result.priceSummary.sampleItemIds);
+  const typicalMealItems = pricedItems.filter((item) => sampleItemIds.has(item.id));
+  const effectiveMenuIndex = state.result.menus.findIndex(
+    (candidateMenu) => candidateMenu.items.filter(
+      (item) => typeof item.price === "number",
+    ).length >= 3,
+  );
+  const menu = effectiveMenuIndex >= 0
+    ? state.result.menus[effectiveMenuIndex]
+    : state.result.menus.at(-1);
+  const menuWarnings = state.result.menus.flatMap((candidateMenu) =>
+    candidateMenu.warnings.map((warning) =>
+      `${orderingSourceHostname(candidateMenu.source)}: ${warning}`,
+    ),
+  );
+  return (
+    <details className="mt-3 rounded-xl border border-emerald-300/15 bg-emerald-500/5 px-3 py-2 text-xs">
+      <summary className="flex cursor-pointer list-none items-center justify-between gap-3 [&::-webkit-details-marker]:hidden">
+        <span className="font-semibold text-emerald-200">Menu data</span>
+        <span className="text-[10px] text-gray-400">
+          {pricedItems.length} priced · View
+        </span>
+      </summary>
+
+      <div className="mt-2 border-t border-white/10 pt-2">
+        <div className="flex items-center justify-between gap-3">
+          <span className="font-semibold text-emerald-200/80">
+            {effectiveMenuIndex > 0 ? "Fallback provider menu" : "Primary provider menu"}
+          </span>
+          <span className="text-gray-400">{state.result.items.length} items</span>
+        </div>
+        <p className="mt-2 text-[10px] text-gray-500">
+          Extraction: {menu?.extractionMethod ?? "none"} · basis: {state.result.priceSummary.basis.replaceAll("_", " ")}
+          {state.result.priceSummary.excludedItemCount > 0
+            ? ` · ${state.result.priceSummary.excludedItemCount} non-meal items excluded`
+            : ""}
+        </p>
+        {hasReliableMealEstimate(state.result.priceSummary) && (
+          <p className="mt-2 text-emerald-100">
+            Typical meal estimate: ${state.result.priceSummary.lowerQuartile?.toFixed(2)}–$
+            {state.result.priceSummary.upperQuartile?.toFixed(2)} · median $
+            {state.result.priceSummary.median?.toFixed(2)}
+          </p>
+        )}
+        {typicalMealItems.length > 0 && (
+          <ul className="mt-3 space-y-1 text-gray-300">
+            {typicalMealItems.slice(0, 8).map((item) => (
+              <li key={item.id} className="flex justify-between gap-3">
+                <span className="truncate">{item.name}</span>
+                <span className="shrink-0">${item.price.toFixed(2)}</span>
+              </li>
+            ))}
+          </ul>
+        )}
+        {menuWarnings.length > 0 && (
+          <ul className="mt-3 space-y-1 border-t border-white/10 pt-3 text-[10px] leading-4 text-amber-200/80">
+            {menuWarnings.map((warning, index) => (
+              <li key={`${index}-${warning}`}>• {warning}</li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </details>
+  );
+}
+
+// Retained as an internal diagnostic renderer, but intentionally excluded from the user UI.
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+function OrderingSourcesPanel({ state }: { state: CandidateOrderingState }) {
+  const primarySource = state.sources[0];
+  const technicalDetailCount =
+    state.sources.length + state.websiteFallbackSources.length + state.warnings.length;
+
+  return (
+    <div className="mt-4 rounded-xl border border-white/10 bg-black/20 p-3">
+      <div className="flex items-center justify-between gap-3 text-xs">
+        <span className="font-semibold text-emerald-200">Ordering providers</span>
+        <span className="text-gray-400">
+          {state.sources.length > 0
+            ? `${state.sources.length} provider link${state.sources.length === 1 ? "" : "s"}`
+            : "not found"}
+        </span>
+      </div>
+
+      {primarySource ? (
+        <div className="mt-3 flex items-start justify-between gap-3 rounded-lg border border-emerald-300/10 bg-emerald-500/5 p-3 text-xs">
+          <div className="min-w-0">
+            <p className="truncate font-semibold text-white">
+              {orderingSourceInventoryLabel(primarySource)}
+            </p>
+            <p className="mt-1 truncate text-[10px] text-gray-400">
+              {orderingSourceHostname(primarySource)} · {primarySource.fulfillment}
+            </p>
+          </div>
+          <span className="shrink-0 text-[10px] text-emerald-200/70">
+            {state.sources.length === 1
+              ? "top-listed"
+              : `+${state.sources.length - 1} alternative${state.sources.length === 2 ? "" : "s"}`}
+          </span>
+        </div>
+      ) : (
+        <p className="mt-2 text-xs leading-5 text-amber-200">
+          Google Maps exposed no resolvable provider URL for this listing.
+        </p>
+      )}
+
+      <details className="mt-3 border-t border-white/10 pt-3 text-[11px] text-gray-500">
+        <summary className="cursor-pointer select-none font-medium text-gray-400 marker:text-gray-600">
+          Show technical details{technicalDetailCount > 0 ? ` · ${technicalDetailCount}` : ""}
+        </summary>
+
+        <div className="mt-3">
+          {state.sources.length > 0 && (
+            <ul className="space-y-3 text-xs text-gray-300">
+              {state.sources.map((source) => (
+                <li key={source.id} className="rounded-lg border border-white/10 bg-white/5 p-3">
+                  <div className="flex items-start justify-between gap-2">
+                    <span className="font-semibold text-white">
+                      {orderingSourceInventoryLabel(source)}
+                    </span>
+                    <span className="shrink-0 text-[10px] uppercase tracking-wide text-gray-500">
+                      {source.fulfillment}
+                    </span>
+                  </div>
+                  <a
+                    href={source.url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="mt-2 block break-all text-purple-300 underline decoration-purple-300/30 underline-offset-2"
+                  >
+                    {orderingSourceHostname(source)} ↗
+                  </a>
+                  <p className="mt-1 break-all text-[10px] leading-4 text-gray-500">
+                    {source.url}
+                  </p>
+                  <p className="mt-2 text-[10px] text-gray-500">
+                    {source.discoveryMethod?.replaceAll("_", " ") ?? "google maps"}
+                    {source.evidenceText ? ` · ${source.evidenceText}` : ""}
+                  </p>
+                </li>
+              ))}
+            </ul>
+          )}
+
+          {state.websiteFallbackSources.length > 0 && (
+            <div className="mt-3 border-t border-white/10 pt-3 text-[11px] text-gray-500">
+              <p className="font-semibold text-gray-400">Website fallback — not counted</p>
+              {state.websiteFallbackSources.map((source) => (
+                <a
+                  key={source.id}
+                  href={source.url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="mt-1 block break-all text-gray-500 underline decoration-white/10 underline-offset-2"
+                >
+                  {orderingSourceHostname(source)} ↗
+                </a>
+              ))}
+            </div>
+          )}
+
+          {state.diagnostics && (
+            <div className="mt-3 border-t border-white/10 pt-3 text-[10px] leading-4 text-gray-500">
+              <p>
+                Online ordering control: {state.diagnostics.orderControlFound ? "found" : "not found"}
+                {state.diagnostics.orderControlLayout
+                  ? ` · ${state.diagnostics.orderControlLayout} layout`
+                  : ""}
+                {state.diagnostics.orderingSurface
+                  ? ` · ${state.diagnostics.orderingSurface.replaceAll("_", " ")}`
+                  : ""}
+              </p>
+              <p>
+                Result scope: {state.diagnostics.resultScope}
+                {` · ${state.diagnostics.inspectedLinkCount ?? 0} links inspected`}
+              </p>
+              {state.diagnostics.pageTitle && (
+                <p className="mt-1 break-words">Page: {state.diagnostics.pageTitle}</p>
+              )}
+              <p>Consent handled: {state.diagnostics.consentHandled ? "yes" : "no"}</p>
+              {state.diagnostics.visibleControlLabels.length > 0 && (
+                <p className="mt-1 break-words">
+                  Visible controls: {state.diagnostics.visibleControlLabels.slice(0, 12).join(" · ")}
+                </p>
+              )}
+              {state.diagnostics.unresolvedControlLabels.length > 0 && (
+                <p className="mt-1 break-words">
+                  Unresolved controls: {state.diagnostics.unresolvedControlLabels.join(", ")}
+                </p>
+              )}
+              {(state.diagnostics.skippedUnsupportedProviders?.length ?? 0) > 0 && (
+                <p className="mt-1 break-words">
+                  Skipped unsupported providers: {state.diagnostics.skippedUnsupportedProviders?.join(" · ")}
+                </p>
+              )}
+            </div>
+          )}
+
+          {state.warnings.length > 0 && (
+            <ul className="mt-3 space-y-1 border-t border-white/10 pt-3 text-[11px] leading-4 text-amber-200/80">
+              {state.warnings.map((warning, warningIndex) => (
+                <li key={`${warningIndex}-${warning}`}>• {warning}</li>
+              ))}
+            </ul>
+          )}
+        </div>
+      </details>
+    </div>
+  );
+}
+
+function activateGoogleBudgetFallback(
+  candidate: RestaurantCandidate,
+  menuStatus: "loaded" | "unavailable",
+): RestaurantCandidate {
+  return {
+    ...candidate,
+    estimatedPriceMin: candidate.googleEstimatedPriceMin,
+    estimatedPriceMax: candidate.googleEstimatedPriceMax,
+    pricePerPerson: candidate.googleEstimatedPriceMidpoint,
+    budgetEstimateSource: candidate.googleBudgetEstimateSource,
+    budgetEstimateConfidence: candidate.googleBudgetEstimateConfidence,
+    budgetEstimateCurrency: candidate.googleBudgetEstimateCurrency,
+    menuStatus,
+  };
+}
+
+function BudgetEstimatePanel({ candidate }: { candidate: RestaurantCandidate }) {
+  const isQueuedForMenu = candidate.menuStatus === "pending";
+  const isCheckingMenu = candidate.menuStatus === "loading";
+  const minimum = candidate.estimatedPriceMin;
+  const maximum = candidate.estimatedPriceMax;
+  const hasRange = typeof minimum === "number" && typeof maximum === "number";
+  const displaysAsSinglePrice = hasRange && minimum.toFixed(2) === maximum.toFixed(2);
+  const sourceLabel = candidate.budgetEstimateSource === "menu"
+    ? displaysAsSinglePrice
+      ? "Menu-derived typical meal price"
+      : "Menu-derived typical meal range"
+    : candidate.budgetEstimateSource === "google_price_range"
+      ? "Fallback: Google price range"
+      : candidate.budgetEstimateSource === "google_price_level"
+        ? "Fallback: Google price-level estimate"
+        : "Budget estimate unavailable";
+  const confidenceLabel = candidate.budgetEstimateConfidence === "none"
+    ? null
+    : `${candidate.budgetEstimateConfidence} confidence`;
+  const currencyPrefix = !candidate.budgetEstimateCurrency || candidate.budgetEstimateCurrency === "USD"
+    ? "$"
+    : `${candidate.budgetEstimateCurrency} `;
+
+  if (isQueuedForMenu || isCheckingMenu) {
+    return (
+      <div className="mt-4 rounded-xl border border-sky-300/15 bg-sky-500/5 p-3 text-xs" aria-live="polite">
+        <div className="flex items-center gap-2 font-semibold text-sky-200">
+          <span className="h-2 w-2 animate-pulse rounded-full bg-sky-300" />
+          {isQueuedForMenu ? "Queued for price check..." : "Checking menu prices..."}
+        </div>
+        <p className="mt-2 text-[10px] leading-4 text-gray-500">
+          {isQueuedForMenu
+            ? "Waiting for a central scraper worker; cached restaurants bypass this queue."
+            : "Google pricing is considered only after Grubhub menu extraction fails."}
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-4 rounded-xl border border-sky-300/15 bg-sky-500/5 p-3 text-xs">
+      <div className="flex items-start justify-between gap-3">
+        <span className="font-semibold text-sky-200">{sourceLabel}</span>
+        {confidenceLabel && (
+          <span className="shrink-0 text-[10px] uppercase tracking-wide text-sky-200/60">
+            {confidenceLabel}
+          </span>
+        )}
+      </div>
+      {hasRange ? (
+        <p className="mt-2 text-sm font-semibold text-white">
+          {displaysAsSinglePrice
+            ? `${currencyPrefix}${minimum.toFixed(2)} per person`
+            : `${currencyPrefix}${minimum.toFixed(2)}–${currencyPrefix}${maximum.toFixed(2)} per person`}
+        </p>
+      ) : (
+        <p className="mt-2 leading-5 text-amber-200/80">
+          No numeric delivery menu or final Google fallback is available, so budget scoring remains pending.
+        </p>
+      )}
+      {candidate.budgetEstimateSource === "google_price_level" && (
+        <p className="mt-2 text-[10px] leading-4 text-gray-500">
+          Grubhub did not produce a reliable estimate; this broad Google band is the final fallback.
+        </p>
+      )}
+    </div>
+  );
+}
+
+const ORDERING_DISCOVERY_TIMEOUT_MS = 70_000;
+const MENU_EXTRACTION_TIMEOUT_MS = 70_000;
+
+async function fetchWithTimeout(
+  input: RequestInfo | URL,
+  init: RequestInit,
+  timeoutMs: number,
+): Promise<Response> {
+  const controller = new AbortController();
+  const timeoutId = window.setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    return await fetch(input, {
+      ...init,
+      signal: controller.signal,
+    });
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") {
+      throw new Error("The provider menu check timed out. Google pricing will be used only as the final fallback.");
+    }
+    throw error;
+  } finally {
+    window.clearTimeout(timeoutId);
+  }
+}
+
 function renderPreferenceDetails(preference: Preference) {
 
   console.log(
@@ -326,6 +716,26 @@ function renderPreferenceDetails(preference: Preference) {
 
       return null;
 
+    case "food": {
+      const preferredFoodTypes = data?.preferredFoodTypes;
+      if (!Array.isArray(preferredFoodTypes) || preferredFoodTypes.length === 0) {
+        return null;
+      }
+
+      return (
+        <div className="mt-3 flex flex-wrap gap-2">
+          {preferredFoodTypes.map((foodType) => (
+            <span
+              key={foodType}
+              className="rounded-full bg-purple-100 px-3 py-1 text-sm font-semibold text-purple-700"
+            >
+              {foodTypeLabel(foodType)}
+            </span>
+          ))}
+        </div>
+      );
+    }
+
 
     default:
       return null;
@@ -350,6 +760,14 @@ export default function RoomPage() {
 
   const [candidateGenerationError, setCandidateGenerationError] =
   useState("");
+
+  const [, setCandidateOrdering] = useState<
+    Record<string, CandidateOrderingState>
+  >({});
+  const [, setCandidateMenus] = useState<
+    Record<string, CandidateMenuState>
+  >({});
+  const orderingDiscoveryRunRef = useRef(0);
 
   const [privateOriginAddress, setPrivateOriginAddress] =
   useState("");
@@ -450,8 +868,6 @@ export default function RoomPage() {
     setSaveStatus("saved");
   }, [storageKey]);
 
-  
-
   // Automatically save changes after a short delay.
   useEffect(() => {
     if (!hasLoaded || selectedCategories.length == 0) {
@@ -501,8 +917,16 @@ export default function RoomPage() {
   }
 
   async function handleGenerateCandidates() {
+    // Regenerating candidates must still reuse central provider/menu caches.
+    // Bypassing every cache entry here caused bursts of concurrent provider
+    // requests, HTTP 429 responses, and a page full of generic Google bands.
+    const forceRefreshFailedCaches = false;
+    const enrichmentRun =
+      orderingDiscoveryRunRef.current + 1;
+    orderingDiscoveryRunRef.current = enrichmentRun;
     setIsGeneratingCandidates(true);
     setCandidateGenerationError("");
+    setCandidateMenus({});
 
     try {
         const response = await fetch(
@@ -538,6 +962,12 @@ export default function RoomPage() {
         }
 
         setCandidates(data.candidates);
+        setCandidateOrdering({});
+        void enrichCandidateOrderingSources(
+          data.candidates,
+          enrichmentRun,
+          forceRefreshFailedCaches,
+        );
     } catch (error) {
         const message =
         error instanceof Error
@@ -549,6 +979,271 @@ export default function RoomPage() {
         setIsGeneratingCandidates(false);
     }
 }
+
+  async function handleDiscoverOrderingSources(
+    candidate: RestaurantCandidate,
+    enrichmentRun = orderingDiscoveryRunRef.current,
+    forceRefreshFailedCaches = false,
+  ) {
+    if (enrichmentRun !== orderingDiscoveryRunRef.current) {
+      return;
+    }
+
+    setCandidates((current) =>
+      current.map((entry) =>
+        entry.id === candidate.id
+          ? { ...entry, menuStatus: "loading" }
+          : entry,
+      ),
+    );
+    setCandidateOrdering((current) => ({
+      ...current,
+      [candidate.id]: {
+        status: "loading",
+        sources: [],
+        websiteFallbackSources: [],
+        warnings: [],
+      },
+    }));
+
+    try {
+      const discoveryResponse = await fetchWithTimeout(
+        "/api/restaurants/ordering-sources",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            placeId: candidate.id,
+            websiteUri: candidate.websiteUri,
+            googleMapsUri: candidate.googleMapsUri,
+            forceRefresh: forceRefreshFailedCaches,
+          }),
+        },
+        ORDERING_DISCOVERY_TIMEOUT_MS,
+      );
+      const discovery =
+        (await discoveryResponse.json()) as OrderingDiscoveryApiResponse;
+      if (!discoveryResponse.ok || "error" in discovery) {
+        throw new Error(
+          "error" in discovery
+            ? discovery.error
+            : "Could not discover ordering sources.",
+        );
+      }
+      if (enrichmentRun !== orderingDiscoveryRunRef.current) {
+        return;
+      }
+
+      setCandidateOrdering((current) => ({
+        ...current,
+        [candidate.id]: {
+          status: "success",
+          sources: discovery.sources,
+          websiteFallbackSources: discovery.websiteFallbackSources,
+          warnings: discovery.warnings,
+          diagnostics: discovery.diagnostics,
+        },
+      }));
+
+      setCandidates((current) =>
+        current.map((entry) => {
+          if (entry.id !== candidate.id) return entry;
+          const discoveredCandidate: RestaurantCandidate = {
+            ...entry,
+            menuStatus: "loading",
+            menuItemCount: 0,
+            orderingSources: discovery.sources,
+          };
+          return discovery.sources.length > 0
+            ? discoveredCandidate
+            : activateGoogleBudgetFallback(discoveredCandidate, "unavailable");
+        }),
+      );
+
+      if (discovery.sources.length > 0) {
+        await handleExtractPrimaryMenu(
+          { ...candidate, orderingSources: discovery.sources },
+          discovery.sources,
+          enrichmentRun,
+          forceRefreshFailedCaches,
+        );
+      }
+    } catch (error) {
+      if (enrichmentRun !== orderingDiscoveryRunRef.current) {
+        return;
+      }
+
+      setCandidateOrdering((current) => ({
+        ...current,
+        [candidate.id]: {
+          status: "error",
+          sources: [],
+          websiteFallbackSources: [],
+          warnings: [],
+          error: error instanceof Error ? error.message : "Could not load this menu.",
+        },
+      }));
+      setCandidates((current) =>
+        current.map((entry) =>
+          entry.id === candidate.id
+            ? activateGoogleBudgetFallback(entry, "unavailable")
+            : entry,
+        ),
+      );
+    }
+  }
+
+  async function enrichCandidateOrderingSources(
+    restaurantCandidates: RestaurantCandidate[],
+    enrichmentRun: number,
+    forceRefreshFailedCaches: boolean,
+  ) {
+    let nextCandidateIndex = 0;
+
+    async function worker() {
+      while (
+        enrichmentRun === orderingDiscoveryRunRef.current
+      ) {
+        const candidate =
+          restaurantCandidates[nextCandidateIndex];
+        nextCandidateIndex += 1;
+
+        if (!candidate) {
+          return;
+        }
+
+        if (
+          candidate.menuStatus === "loaded"
+        ) {
+          continue;
+        }
+
+        await handleDiscoverOrderingSources(
+          candidate,
+          enrichmentRun,
+          forceRefreshFailedCaches,
+        );
+      }
+    }
+
+    // Google Maps discovery can overlap, while each central provider queue
+    // serializes extraction. Two workers keep a queued route below the
+    // route timeout without opening a burst of provider browser sessions.
+    await Promise.all([worker(), worker()]);
+  }
+
+  async function handleExtractPrimaryMenu(
+    candidate: RestaurantCandidate,
+    sources = candidate.orderingSources,
+    enrichmentRun?: number,
+    retryFailed = false,
+  ) {
+    if (
+      typeof enrichmentRun === "number" &&
+      enrichmentRun !== orderingDiscoveryRunRef.current
+    ) {
+      return;
+    }
+    const primarySource = sources[0];
+    if (!primarySource) return;
+
+    setCandidates((current) =>
+      current.map((entry) =>
+        entry.id === candidate.id
+          ? { ...entry, menuStatus: "loading" }
+          : entry,
+      ),
+    );
+
+    setCandidateMenus((current) => ({
+      ...current,
+      [candidate.id]: { status: "loading" },
+    }));
+
+    try {
+      const response = await fetchWithTimeout(
+        "/api/restaurants/menu",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            placeId: candidate.id,
+            restaurantName: candidate.name,
+            restaurantAddress: candidate.address,
+            mealProfile: candidate.restaurantMealProfile,
+            sources: sources.slice(0, 3),
+            retryFailed,
+          }),
+        },
+        MENU_EXTRACTION_TIMEOUT_MS,
+      );
+      const data = (await response.json()) as RestaurantMenuApiResponse;
+      if (!response.ok || "error" in data) {
+        const message = "error" in data
+          ? data.error
+          : "Could not extract the primary menu.";
+        if ("error" in data && data.retryable) {
+          throw new Error(`Temporary provider failure: ${message}`);
+        }
+        throw new Error(message);
+      }
+      if (
+        typeof enrichmentRun === "number" &&
+        enrichmentRun !== orderingDiscoveryRunRef.current
+      ) {
+        return;
+      }
+
+      setCandidateMenus((current) => ({
+        ...current,
+        [candidate.id]: { status: "success", result: data },
+      }));
+
+      setCandidates((current) =>
+        current.map((entry) => {
+          if (entry.id !== candidate.id) return entry;
+          const hasReliablePriceSample = hasReliableMealEstimate(data.priceSummary);
+          if (!hasReliablePriceSample) {
+            return activateGoogleBudgetFallback(
+              { ...entry, menuItemCount: data.items.length },
+              "loaded",
+            );
+          }
+          return {
+            ...entry,
+            estimatedPriceMin:
+              data.priceSummary.lowerQuartile ?? data.priceSummary.minimum,
+            estimatedPriceMax:
+              data.priceSummary.upperQuartile ?? data.priceSummary.maximum,
+            pricePerPerson: data.priceSummary.median,
+            budgetEstimateSource: "menu",
+            budgetEstimateConfidence: mealEstimateConfidence(data.priceSummary),
+            budgetEstimateCurrency: data.priceSummary.currency ?? "USD",
+            menuStatus: "loaded",
+            menuItemCount: data.items.length,
+          };
+        }),
+      );
+    } catch (error) {
+      const errorMessage = error instanceof Error
+        ? error.message
+        : "Could not extract the primary menu.";
+      setCandidates((current) =>
+        current.map((entry) =>
+          entry.id === candidate.id
+            ? activateGoogleBudgetFallback(entry, "loaded")
+            : entry,
+        ),
+      );
+      setCandidateMenus((current) => ({
+        ...current,
+        [candidate.id]: {
+          status: "error",
+          error: errorMessage,
+        },
+      }));
+    }
+  }
 
   function updateDraft<K extends keyof PreferenceDraft>(
     field: K,
@@ -571,12 +1266,33 @@ export default function RoomPage() {
   ) {
     event.preventDefault();
 
-    const trimmedStatement = draft.statement.trim();
+    const foodTypeNames = draft.foodTypes.map(foodTypeLabel);
+    const trimmedStatement = draft.category === "food"
+      ? foodTypeNames.join(", ")
+      : draft.statement.trim();
 
     if (!trimmedStatement) {
-      setFormError("Please describe what matters to you.");
+      setFormError(
+        draft.category === "food"
+          ? "Select at least one food type."
+          : "Please describe what matters to you.",
+      );
       return;
     }
+
+    const fixedFoodInterpretation: PreferenceInterpretation | undefined =
+      draft.category === "food"
+        ? {
+            status: "success",
+            summary: `Preferred food types: ${foodTypeNames.join(", ")}`,
+            structuredData: {
+              preferredFoodTypes: draft.foodTypes,
+            },
+            clarificationQuestion: null,
+            source: "fixed",
+            confirmed: true,
+          }
+        : undefined;
 
     setFormError("");
 
@@ -600,8 +1316,11 @@ export default function RoomPage() {
           statement:trimmedStatement,
           importance:draft.importance,
           visibility:draft.visibility,
-          interpretation: 
-            preference.interpretation,
+          interpretation:
+            fixedFoodInterpretation ??
+            (preference.category === draft.category
+              ? preference.interpretation
+              : undefined),
         };
       })
     );
@@ -612,6 +1331,7 @@ export default function RoomPage() {
         statement: trimmedStatement,
         importance: draft.importance,
         visibility: draft.visibility,
+        interpretation: fixedFoodInterpretation,
       };
 
       setPreferences((currentPreferences) => [
@@ -966,6 +1686,8 @@ export default function RoomPage() {
     setDraft({
       category: preference.category,
       statement: preference.statement,
+      foodTypes:
+        preference.interpretation?.structuredData.preferredFoodTypes ?? [],
       importance: preference.importance,
       visibility: preference.visibility,
     });
@@ -1016,11 +1738,18 @@ export default function RoomPage() {
         ...score,
       };
     })
-    .sort(
-      (a, b) =>
-        b.totalScore - a.totalScore,
-    );
-
+    .sort((a, b) => {
+      if (
+        a.totalScore === null &&
+        b.totalScore === null
+      ) {
+        return a.candidate.distanceMiles -
+          b.candidate.distanceMiles;
+      }
+      if (a.totalScore === null) return 1;
+      if (b.totalScore === null) return -1;
+      return b.totalScore - a.totalScore;
+    });
 
   if (!hasLoaded) {
     return (
@@ -1126,7 +1855,7 @@ export default function RoomPage() {
                             htmlFor="preference-visibility"
                             className="mb-2 block text-sm font-semibold text-gray-800"
                         >
-                            Visibility
+                            Who can see this?
                         </label>
 
                         <select
@@ -1152,7 +1881,71 @@ export default function RoomPage() {
                     </div>
 
                 
-                    {/* Preference statement */}
+                    {/* Fixed food-type input or free statement for other categories */}
+                    {draft.category === "food" ? (
+                    <div className="mt-5">
+                        <div className="flex min-h-8 items-center justify-between gap-3">
+                        <div>
+                            <p className="text-sm font-semibold text-gray-800">
+                            What sounds good?
+                            </p>
+                            <p className="mt-1 text-sm text-gray-500">
+                            Select every food type you would be happy with.
+                            </p>
+                        </div>
+
+                        {draft.foodTypes.length > 0 && (
+                            <button
+                            type="button"
+                            onClick={() => updateDraft("foodTypes", [])}
+                            className="shrink-0 text-sm font-semibold text-purple-700 transition hover:text-purple-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-500 focus-visible:ring-offset-2"
+                            >
+                            Clear all
+                            </button>
+                        )}
+                        </div>
+
+                        <p className="mt-3 text-sm font-medium text-gray-600" aria-live="polite">
+                        {draft.foodTypes.length === 0
+                            ? "Nothing selected yet"
+                            : `${draft.foodTypes.length} selected`}
+                        </p>
+
+                        <div className="mt-3 grid grid-cols-2 gap-2 md:grid-cols-4">
+                        {FOOD_TYPE_OPTIONS.map((option) => {
+                            const selected = draft.foodTypes.includes(option.value);
+                            return (
+                            <button
+                                key={option.value}
+                                type="button"
+                                aria-pressed={selected}
+                                onClick={() => {
+                                updateDraft(
+                                    "foodTypes",
+                                    selected
+                                    ? draft.foodTypes.filter((value) => value !== option.value)
+                                    : [...draft.foodTypes, option.value],
+                                );
+                                setFormError("");
+                                }}
+                                className={`flex min-h-11 items-center justify-center gap-2 rounded-xl border px-3 py-2.5 text-sm font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-500 focus-visible:ring-offset-2 ${
+                                selected
+                                    ? "border-purple-600 bg-purple-600 text-white shadow-sm"
+                                    : "border-gray-200 bg-gray-50 text-gray-700 hover:border-purple-300 hover:bg-purple-50"
+                                }`}
+                            >
+                                {selected && (
+                                <span aria-hidden="true" className="text-base leading-none">
+                                    &#10003;
+                                </span>
+                                )}
+                                {option.label}
+                            </button>
+                            );
+                        })}
+                        </div>
+                    </div>
+                    ) : (
                     <div className="mt-5">
                         <label
                         htmlFor="preference"
@@ -1167,23 +1960,24 @@ export default function RoomPage() {
                         onChange={(event) =>
                             updateDraft("statement", event.target.value)
                         }
-                        placeholder="For example: I would prefer Japanese food"
+                        placeholder="Describe what matters to you"
                         className="w-full rounded-2xl border border-gray-300 bg-gray-50 px-4 py-3 text-gray-900 outline-none transition placeholder:text-gray-400 focus:border-purple-500 focus:bg-white focus:ring-4 focus:ring-purple-100"
                         />
-
-                        {formError && (
-                        <p className="mt-2 text-sm text-red-600">
-                            {formError}
-                        </p>
-                        )}
                     </div>
+                    )}
+
+                    {formError && (
+                    <p className="mt-2 text-sm text-red-600">
+                        {formError}
+                    </p>
+                    )}
 
                         
 
                     {/* Importance selection */}
                     <fieldset className="mt-5">
                         <legend className="text-sm font-semibold text-gray-800">
-                        How important is this?
+                        How much should this affect recommendations?
                         </legend>
 
                         <div className="mt-3 grid grid-cols-5 gap-2">
@@ -1197,6 +1991,8 @@ export default function RoomPage() {
                                 onClick={() =>
                                 updateDraft("importance", importance)
                                 }
+                                aria-label={`${importance}: ${importanceLabels[importance]}`}
+                                aria-pressed={selected}
                                 className={`rounded-2xl border py-3 font-semibold transition ${
                                 selected
                                     ? "border-purple-600 bg-purple-600 text-white"
@@ -1207,6 +2003,11 @@ export default function RoomPage() {
                             </button>
                             );
                         })}
+                        </div>
+
+                        <div className="mt-2 flex justify-between text-xs font-medium text-gray-500">
+                        <span>Flexible</span>
+                        <span>Must match</span>
                         </div>
 
                         <p className="mt-3 text-sm font-medium text-purple-700">
@@ -1413,7 +2214,7 @@ export default function RoomPage() {
                                 </h2>
 
                                 <p className="mt-2 max-w-xl text-sm leading-6 text-gray-400">
-                                Your local agent evaluates each option using your confirmed preferences.
+                                Ranked using your confirmed preferences.
                                 </p>
                             </div>
 
@@ -1484,14 +2285,18 @@ export default function RoomPage() {
                                         {index + 1}
                                         </span>
 
-                                        <span className="rounded-full bg-white/10 px-3 py-1 text-xs font-semibold text-gray-200">
-                                        {candidate.distanceMiles} miles
-                                        </span>
-
-                                        <p className="mt-1 text-sm text-gray-400">
-                                        ${candidate.estimatedPriceMin}-
-                                        ${candidate.estimatedPriceMax} / person
-                                      </p>
+                                        <div className="flex flex-wrap justify-end gap-2">
+                                          <span className="rounded-full bg-purple-500/20 px-3 py-1 text-xs font-semibold text-purple-200">
+                                            {totalScore === null
+                                              ? `Score pending · ${breakdown.filter((item) => item.status !== "pending").length}/${breakdown.length} checked`
+                                              : breakdown.some((item) => item.status === "uncertain")
+                                                ? `Estimated score ${Math.round(totalScore * 100)}%`
+                                                : `Score ${Math.round(totalScore * 100)}%`}
+                                          </span>
+                                          <span className="rounded-full bg-white/10 px-3 py-1 text-xs font-semibold text-gray-200">
+                                            {candidate.distanceMiles} miles
+                                          </span>
+                                        </div>
                                     </div>
 
                                     <h3 className="mt-5 text-lg font-semibold text-white">
@@ -1502,50 +2307,7 @@ export default function RoomPage() {
                                         {candidate.address}
                                     </p>
 
-                                    <div className="mt-5">
-                                      <span
-                                      className="
-                                      inline-flex
-                                      rounded-full
-                                      bg-purple-500/20
-                                      px-3
-                                      py-1
-                                      text-xs
-                                      font-semibold
-                                      text-purple-200
-                                      "
-                                      >
-                                          Score {Math.round(totalScore * 100)}%
-                                      </span>
-                                  </div>
-
-                                  <div className="mt-4 space-y-2">
-                                  {
-                                  breakdown.map((item)=>(
-                                      <div
-                                      key={item.category}
-                                      className="
-                                      flex
-                                      justify-between
-                                      text-sm
-                                      text-gray-300
-                                      "
-                                      >
-                                          <span>
-                                              {item.category}
-                                          </span>
-
-                                          <span>
-                                              {Math.round(item.score * 100)}%
-                                          </span>
-                                      </div>
-                                  ))
-                                  }
-                                  </div>
-
-                                    <p className="mt-4 text-xs text-gray-500">
-                                        Evaluated privately on this device
-                                    </p>
+                                    <BudgetEstimatePanel candidate={candidate} />
                                     </article>
                                 ),
                                 )}
