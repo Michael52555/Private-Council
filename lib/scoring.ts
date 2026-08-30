@@ -3,7 +3,6 @@ import type {
   Preference,
   RestaurantCandidate,
 } from "@/lib/planning-types";
-import { foodTypeFacet } from "@/lib/planning-types";
 
 export type PreferenceScore = {
   category: "distance" | "budget" | "food";
@@ -168,21 +167,6 @@ export function evaluateFoodScore(
     };
   }
 
-  const relevantFacets = new Set(uniquePreferredFoodTypes.map(foodTypeFacet));
-  const hasUnknownFacet = [...relevantFacets].some(
-    (facet) => !candidate.foodTypeVector.knownFacets.includes(facet),
-  );
-
-  // A missing API profile is unknown evidence rather than a false mismatch.
-  // Successful API profiles are treated as the restaurant's complete sticker
-  // set, so a zero intersection receives zero coverage.
-  if (
-    candidate.foodTypeEstimateSource === "google_types_fallback" &&
-    hasUnknownFacet
-  ) {
-    return { score: 0.5, status: "uncertain" };
-  }
-
   return {
     score: 0,
     status: candidate.foodTypeEstimateConfidence === "low" ||
@@ -190,13 +174,6 @@ export function evaluateFoodScore(
       ? "uncertain"
       : "ready",
   };
-}
-
-export function foodEvidenceWeight(candidate: RestaurantCandidate): number {
-  if (candidate.foodTypeEstimateConfidence === "high") return 1;
-  if (candidate.foodTypeEstimateConfidence === "medium") return 0.8;
-  if (candidate.foodTypeEstimateConfidence === "low") return 0.45;
-  return 0;
 }
 
 function isConfirmed(preference: Preference | undefined): boolean {
@@ -313,8 +290,7 @@ export function evaluateRestaurantScore(
         score: foodEvaluation.score,
         weight:
           categoryPriorityWeight.food *
-          importanceWeight(foodPreference.importance) *
-          foodEvidenceWeight(candidate),
+          importanceWeight(foodPreference.importance),
       });
     }
   }

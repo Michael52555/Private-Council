@@ -345,7 +345,7 @@ test("factors fractional food coverage into the weighted restaurant score", () =
   );
 
   assert.equal(result.breakdown[1].score, 0.25);
-  assertClose(result.totalScore, (0.2 + 0.25 * 0.6 * 0.8) / (0.2 + 0.6 * 0.8));
+  assertClose(result.totalScore, (0.2 + 0.25 * 0.6) / 0.8);
 });
 
 test("uses a 60/20/20 food, distance, and budget priority split", () => {
@@ -402,7 +402,7 @@ test("gives full food coverage only when every selected label matches", () => {
   assert.deepEqual(result, { score: 1, status: "ready" });
 });
 
-test("keeps an unknown cuisine neutral instead of treating hot pot as Chinese", () => {
+test("gives zero coverage when the restaurant labels do not intersect", () => {
   const result = evaluateFoodScore(
     candidate({
       foodTypeVector: buildRestaurantFoodVector({
@@ -413,7 +413,20 @@ test("keeps an unknown cuisine neutral instead of treating hot pot as Chinese", 
     ["chinese"],
   );
 
-  assert.deepEqual(result, { score: 0.5, status: "uncertain" });
+  assert.deepEqual(result, { score: 0, status: "ready" });
+});
+
+test("does not reward a Google cafe fallback for unrelated Asian preferences", () => {
+  const result = evaluateFoodScore(
+    candidate({
+      foodTypeVector: buildRestaurantFoodVector({ primaryType: "cafe" }),
+      foodTypeEstimateSource: "google_types_fallback",
+      foodTypeEstimateConfidence: "medium",
+    }),
+    ["chinese", "japanese", "korean", "seafood"],
+  );
+
+  assert.deepEqual(result, { score: 0, status: "ready" });
 });
 
 test("penalizes a known cuisine mismatch", () => {
@@ -430,7 +443,7 @@ test("penalizes a known cuisine mismatch", () => {
   assert.deepEqual(result, { score: 0, status: "ready" });
 });
 
-test("keeps a low-confidence API food match but reduces its authority", () => {
+test("marks a low-confidence API food match uncertain without diluting its coverage", () => {
   const result = evaluateFoodScore(
     candidate({
       foodTypeVector: buildRestaurantFoodVector({

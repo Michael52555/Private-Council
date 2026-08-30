@@ -6,7 +6,12 @@ import {
 import { classifyRestaurantMealProfile } from "@/lib/menu/restaurant-profile";
 import { buildRestaurantFoodVector } from "@/lib/restaurant-food-vector";
 import { profileRestaurantCandidates } from "@/lib/restaurant-profiler";
-import type { RestaurantCandidate } from "@/lib/planning-types";
+import {
+  FOOD_TYPE_OPTIONS,
+  type FoodType,
+  type RestaurantCandidate,
+} from "@/lib/planning-types";
+import { googleSearchTypesForFoodPreferences } from "@/lib/restaurant-search-types";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -45,6 +50,12 @@ type GoogleNearbySearchResponse = {
   places?: GoogleNearbyPlace[];
   error?: { message?: string };
 };
+
+const googleNearbyResultLimit = 20;
+const restaurantCandidatePoolLimit = 24;
+const foodTypeValues = new Set<string>(
+  FOOD_TYPE_OPTIONS.map((option) => option.value),
+);
 
 async function geocodeAddress(address: string): Promise<GeocodedOrigin | null> {
   const apiKey = process.env.GOOGLE_MAPS_API_KEY;
@@ -106,10 +117,11 @@ function calculateDistanceMiles(
   return Math.round(3958.8 * angularDistance * 10) / 10;
 }
 
-async function searchNearbyRestaurants(
+async function fetchNearbyPlaces(
   origin: GeocodedOrigin,
   radiusMeters: number,
-): Promise<RestaurantCandidate[]> {
+  includedTypes: readonly string[],
+): Promise<GoogleNearbyPlace[]> {
   const apiKey = process.env.GOOGLE_MAPS_API_KEY;
   if (!apiKey) throw new Error("GOOGLE_MAPS_API_KEY is not configured.");
 
@@ -124,9 +136,9 @@ async function searchNearbyRestaurants(
         "places.priceRange,places.userRatingCount,places.primaryType,places.types",
     },
     body: JSON.stringify({
-      includedTypes: ["restaurant"],
-      maxResultCount: 20,
-      rankPreference: "DISTANCE",
+      includedTypes,
+      maxResultCount: googleNearbyResultLimit,
+      rankPreference: "POPULARITY",
       locationRestriction: {
         circle: {
           center: { latitude: origin.latitude, longitude: origin.longitude },
@@ -144,36 +156,41 @@ async function searchNearbyRestaurants(
     );
   }
 
-  const candidates: RestaurantCandidate[] = [];
-  for (const place of data.places ?? []) {
-    const id = place.id;
-    const name = place.displayName?.text;
-    const latitude = place.location?.latitude;
-    const longitude = place.location?.longitude;
-    if (
-      typeof id !== "string" ||
-      typeof name !== "string" ||
-      typeof latitude !== "number" ||
-      !Number.isFinite(latitude) ||
-      typeof longitude !== "number" ||
-      !Number.isFinite(longitude)
-    ) {
-      continue;
-    }
+  return data.places ?? [];
+}
 
-    const googleBudget = googleBudgetEstimate({
-      priceRange: place.priceRange,
-      priceLevel: place.priceLevel,
-    });
-    const placeTypes = Array.isArray(place.types)
-      ? place.types.filter((type): type is string => typeof type === "string")
-      : [];
-    const restaurantMealProfile = classifyRestaurantMealProfile({
-      name,
-      primaryType: place.primaryType,
-      placeTypes,
-    });
-    candidates.push({
+function candidateFromGooglePlace(
+  place: GoogleNearbyPlace,
+  origin: GeocodedOrigin,
+): RestaurantCandidate | null {
+  const id = place.id;
+  const name = place.displayName?.text;
+  const latitude = place.location?.latitude;
+  const longitude = place.location?.longitude;
+  if (
+    typeof id !== "string" ||
+    typeof name !== "string" ||
+    typeof latitude !== "number" ||
+    !Number.isFinite(latitude) ||
+    typeof longitude !== "number" ||
+    !Number.isFinite(longitude)
+  ) {
+    return null;
+  }
+
+  const googleBudget = googleBudgetEstimate({
+    priceRange: place.priceRange,
+    priceLevel: place.priceLevel,
+  });
+  const placeTypes = Array.isArray(place.types)
+    ? place.types.filter((type): type is string => typeof type === "string")
+    : [];
+  const restaurantMealProfile = classifyRestaurantMealProfile({
+    name,
+    primaryType: place.primaryType,
+    placeTypes,
+  });
+  return {
       id,
       name,
       address: place.formattedAddress ?? "Address unavailable",
@@ -216,7 +233,46 @@ async function searchNearbyRestaurants(
       websiteUri: place.websiteUri,
       googleMapsUri: place.googleMapsUri,
       orderingSources: [],
-    });
+  };
+}
+
+async function searchNearbyRestaurants(
+  origin: GeocodedOrigin,
+  radiusMeters: number,
+  preferredFoodTypes: readonly FoodType[],
+): Promise<RestaurantCandidate[]> {
+  const preferredGoogleTypes = googleSearchTypesForFoodPreferences(
+    preferredFoodTypes,
+  );
+  const generalSearch = fetchNearbyPlaces(
+    origin,
+    radiusMeters,
+    ["restaurant"],
+  );
+  const preferenceSearch = preferredGoogleTypes.length > 0
+    ? fetchNearbyPlaces(origin, radiusMeters, preferredGoogleTypes).catch(
+        (error) => {
+          console.warn(
+            "Preference-aware restaurant discovery failed; using the general pool:",
+            error,
+          );
+          return [];
+        },
+      )
+    : Promise.resolve([]);
+  const [preferredPlaces, generalPlaces] = await Promise.all([
+    preferenceSearch,
+    generalSearch,
+  ]);
+
+  const candidates: RestaurantCandidate[] = [];
+  const seenPlaceIds = new Set<string>();
+  for (const place of [...preferredPlaces, ...generalPlaces]) {
+    const candidate = candidateFromGooglePlace(place, origin);
+    if (!candidate || seenPlaceIds.has(candidate.id)) continue;
+    seenPlaceIds.add(candidate.id);
+    candidates.push(candidate);
+    if (candidates.length >= restaurantCandidatePoolLimit) break;
   }
 
   return candidates;
@@ -228,6 +284,7 @@ export async function POST(request: Request) {
       planName?: unknown;
       originAddress?: unknown;
       radiusMiles?: unknown;
+      preferredFoodTypes?: unknown;
     };
     const planName = typeof body.planName === "string" ? body.planName.trim() : "";
     const originAddress =
@@ -243,6 +300,12 @@ export async function POST(request: Request) {
       typeof body.radiusMiles === "number" && Number.isFinite(body.radiusMiles)
         ? Math.min(Math.max(body.radiusMiles, 1), 30)
         : 5;
+    const preferredFoodTypes = Array.isArray(body.preferredFoodTypes)
+      ? [...new Set(body.preferredFoodTypes.filter(
+          (value): value is FoodType =>
+            typeof value === "string" && foodTypeValues.has(value),
+        ))]
+      : [];
     const geocodedOrigin = await geocodeAddress(originAddress);
     if (!geocodedOrigin) {
       return NextResponse.json(
@@ -254,6 +317,7 @@ export async function POST(request: Request) {
     const candidates = await searchNearbyRestaurants(
       geocodedOrigin,
       Math.round(radiusMiles * 1609.344),
+      preferredFoodTypes,
     );
 
     const profiled = await profileRestaurantCandidates(candidates);

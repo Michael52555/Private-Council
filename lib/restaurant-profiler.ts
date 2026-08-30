@@ -12,7 +12,7 @@ import {
   storeRestaurantProfileCacheBatch,
 } from "@/lib/restaurant-profile-cache";
 
-const profileBatchSize = 10;
+const profileBatchSize = 12;
 const profileWorkerCount = 2;
 const profileRequestTimeoutMs = 15_000;
 const foodStickerDictionary = FOOD_TYPE_OPTIONS.map((option) => ({

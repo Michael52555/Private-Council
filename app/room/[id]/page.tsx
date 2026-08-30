@@ -963,6 +963,19 @@ export default function RoomPage() {
     setCandidateGenerationError("");
     setCandidateMenus({});
 
+    const radiusMiles = preferences.find(
+      (preference) =>
+        preference.category === "distance" &&
+        preference.interpretation?.status === "success" &&
+        preference.interpretation.confirmed,
+    )?.interpretation?.structuredData.maxDistanceMiles;
+    const preferredFoodTypes = preferences.find(
+      (preference) =>
+        preference.category === "food" &&
+        preference.interpretation?.status === "success" &&
+        preference.interpretation.confirmed,
+    )?.interpretation?.structuredData.preferredFoodTypes ?? [];
+
     try {
         const response = await fetch(
         "/api/generate-candidates",
@@ -974,6 +987,8 @@ export default function RoomPage() {
             body: JSON.stringify({
             planName,
             originAddress: privateOriginAddress.trim(),
+            radiusMiles,
+            preferredFoodTypes,
             }),
         },
     );
