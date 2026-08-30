@@ -1,10 +1,6 @@
 import OpenAI from "openai";
 import { NextResponse } from "next/server";
 
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
-
 type InterpretBudgetRequest = {
   statement?: unknown;
 };
@@ -19,6 +15,9 @@ type BudgetInterpretation = {
 
 export async function POST(request: Request) {
   try {
+    const openai = new OpenAI({
+      apiKey: process.env.OPENAI_API_KEY,
+    });
     const body =
       (await request.json()) as InterpretBudgetRequest;
 

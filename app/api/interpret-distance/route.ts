@@ -8,8 +8,6 @@ type DistanceInterpretationResult = {
   clarificationQuestion: string | null;
 };
 
-const openai = new OpenAI();
-
 function isValidResult(
   value: unknown,
 ): value is DistanceInterpretationResult {
@@ -51,6 +49,9 @@ function isValidResult(
 
 export async function POST(request: Request) {
   try {
+    const openai = new OpenAI({
+      apiKey: process.env.OPENAI_API_KEY,
+    });
     const body: unknown = await request.json();
 
     if (typeof body !== "object" || body === null) {
