@@ -12,7 +12,7 @@ import {
 } from "@/lib/restaurant-food-vector";
 
 export const restaurantProfileSchemaVersion = 1;
-export const restaurantProfilePromptVersion = 1;
+export const restaurantProfilePromptVersion = 2;
 
 export type RestaurantProfileInput = {
   placeId: string;
