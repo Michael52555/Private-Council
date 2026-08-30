@@ -143,17 +143,18 @@ export function evaluateFoodScore(
   candidate: RestaurantCandidate,
   preferredFoodTypes: FoodType[],
 ): FoodScoreEvaluation {
-  if (preferredFoodTypes.length === 0) {
+  const uniquePreferredFoodTypes = [...new Set(preferredFoodTypes)];
+  if (uniquePreferredFoodTypes.length === 0) {
     return { score: null, status: "pending" };
   }
 
-  if (
-    preferredFoodTypes.some(
-      (foodType) => candidate.foodTypeVector.values[foodType] === 1,
-    )
-  ) {
+  const matchingFoodTypeCount = uniquePreferredFoodTypes.filter(
+    (foodType) => candidate.foodTypeVector.values[foodType] === 1,
+  ).length;
+
+  if (matchingFoodTypeCount > 0) {
     return {
-      score: 1,
+      score: matchingFoodTypeCount / uniquePreferredFoodTypes.length,
       status: candidate.foodTypeEstimateConfidence === "low" ||
         candidate.foodTypeEstimateConfidence === "none"
         ? "uncertain"
@@ -161,14 +162,18 @@ export function evaluateFoodScore(
     };
   }
 
-  const relevantFacets = new Set(preferredFoodTypes.map(foodTypeFacet));
+  const relevantFacets = new Set(uniquePreferredFoodTypes.map(foodTypeFacet));
   const hasUnknownFacet = [...relevantFacets].some(
     (facet) => !candidate.foodTypeVector.knownFacets.includes(facet),
   );
 
-  // Google can return a generic `restaurant` type without a cuisine or style.
-  // Unknown evidence is neutral rather than a false mismatch.
-  if (hasUnknownFacet) {
+  // A missing API profile is unknown evidence rather than a false mismatch.
+  // Successful API profiles are treated as the restaurant's complete sticker
+  // set, so a zero intersection receives zero coverage.
+  if (
+    candidate.foodTypeEstimateSource === "google_types_fallback" &&
+    hasUnknownFacet
+  ) {
     return { score: 0.5, status: "uncertain" };
   }
 

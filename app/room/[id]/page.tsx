@@ -1924,7 +1924,7 @@ export default function RoomPage() {
                             What are you in the mood for?
                             </p>
                             <p className="mt-1 text-sm text-gray-500">
-                            Choose any cuisines or styles that sound good. Matching any one counts.
+                            Choose any cuisines or styles that sound good. Restaurants matching more selections rank higher.
                             </p>
                         </div>
 

@@ -1304,7 +1304,7 @@ export default function SetupPage() {
                             </h3>
 
                             <p className="mt-2 text-sm leading-6 text-gray-500">
-                            Choose any cuisines or styles that sound good. Matching any one of them counts.
+                            Choose any cuisines or styles that sound good. Restaurants matching more selections rank higher.
                             </p>
 
                             <div className="mt-5">

@@ -298,7 +298,7 @@ test("uses a continuous penalty for Google prices outside the budget", () => {
   assert.equal(covered.totalScore, 1);
 });
 
-test("matches a selected cuisine from the universal Google type vector", () => {
+test("scores food preferences by the fraction of selected labels matched", () => {
   const result = evaluateFoodScore(
     candidate({
       foodTypeVector: buildRestaurantFoodVector({
@@ -307,7 +307,56 @@ test("matches a selected cuisine from the universal Google type vector", () => {
       }),
       foodTypeEstimateConfidence: "medium",
     }),
-    ["chinese", "hot_pot"],
+    ["chinese", "japanese", "korean", "seafood"],
+  );
+
+  assert.deepEqual(result, { score: 0.25, status: "ready" });
+});
+
+test("factors fractional food coverage into the weighted restaurant score", () => {
+  const foodPreferences: Preference[] = [
+    preferences[0],
+    {
+      id: "food",
+      category: "food",
+      statement: "Chinese, Japanese, Korean, or seafood",
+      importance: 5,
+      visibility: "private",
+      interpretation: {
+        status: "success",
+        summary: "Preferred food types",
+        structuredData: {
+          preferredFoodTypes: ["chinese", "japanese", "korean", "seafood"],
+        },
+        clarificationQuestion: null,
+        source: "fixed",
+        confirmed: true,
+      },
+    },
+  ];
+  const result = evaluateRestaurantScore(
+    candidate({
+      foodTypeVector: buildRestaurantFoodVector({
+        primaryType: "chinese_restaurant",
+      }),
+      foodTypeEstimateConfidence: "medium",
+    }),
+    foodPreferences,
+  );
+
+  assert.equal(result.breakdown[1].score, 0.25);
+  assertClose(result.totalScore, (1 + 0.25 * 0.8) / 1.8);
+});
+
+test("gives full food coverage only when every selected label matches", () => {
+  const result = evaluateFoodScore(
+    candidate({
+      foodTypeVector: buildRestaurantFoodVector({
+        primaryType: "chinese_noodle_restaurant",
+      }),
+      foodTypeEstimateConfidence: "high",
+    }),
+    ["chinese", "noodles"],
   );
 
   assert.deepEqual(result, { score: 1, status: "ready" });
