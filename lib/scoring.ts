@@ -20,6 +20,12 @@ export type ScoreBreakdownItem = {
 type BudgetScoreEvaluation = Pick<ScoreBreakdownItem, "score" | "status">;
 type FoodScoreEvaluation = Pick<ScoreBreakdownItem, "score" | "status">;
 
+const categoryPriorityWeight: Record<PreferenceScore["category"], number> = {
+  food: 0.6,
+  distance: 0.2,
+  budget: 0.2,
+};
+
 export type RestaurantScore = {
   totalScore: number | null;
   provisionalScore: number | null;
@@ -268,9 +274,9 @@ export function evaluateRestaurantScore(
       scores.push({
         category: "distance",
         score: distanceScore,
-        weight: importanceWeight(
-          distancePreference.importance,
-        ),
+        weight:
+          categoryPriorityWeight.distance *
+          importanceWeight(distancePreference.importance),
       });
     }
   }
@@ -287,6 +293,7 @@ export function evaluateRestaurantScore(
         category: "budget",
         score: budgetEvaluation.score,
         weight:
+          categoryPriorityWeight.budget *
           importanceWeight(budgetPreference.importance) *
           budgetEvidenceWeight(candidate),
       });
@@ -305,6 +312,7 @@ export function evaluateRestaurantScore(
         category: "food",
         score: foodEvaluation.score,
         weight:
+          categoryPriorityWeight.food *
           importanceWeight(foodPreference.importance) *
           foodEvidenceWeight(candidate),
       });

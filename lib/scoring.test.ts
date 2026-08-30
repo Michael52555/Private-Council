@@ -345,7 +345,47 @@ test("factors fractional food coverage into the weighted restaurant score", () =
   );
 
   assert.equal(result.breakdown[1].score, 0.25);
-  assertClose(result.totalScore, (1 + 0.25 * 0.8) / 1.8);
+  assertClose(result.totalScore, (0.2 + 0.25 * 0.6 * 0.8) / (0.2 + 0.6 * 0.8));
+});
+
+test("uses a 60/20/20 food, distance, and budget priority split", () => {
+  const foodPreference: Preference = {
+    id: "food-priority",
+    category: "food",
+    statement: "Chinese",
+    importance: 5,
+    visibility: "private",
+    interpretation: {
+      status: "success",
+      summary: "Chinese",
+      structuredData: { preferredFoodTypes: ["chinese"] },
+      clarificationQuestion: null,
+      source: "fixed",
+      confirmed: true,
+    },
+  };
+  const result = evaluateRestaurantScore(
+    candidate({
+      estimatedPriceMin: 25,
+      estimatedPriceMax: 45,
+      pricePerPerson: 35,
+      budgetEstimateSource: "menu",
+      budgetEstimateConfidence: "high",
+      budgetEstimateCurrency: "USD",
+      menuStatus: "loaded",
+      foodTypeVector: buildRestaurantFoodVector({
+        primaryType: "italian_restaurant",
+      }),
+      foodTypeEstimateSource: "api_profile",
+      foodTypeEstimateConfidence: "high",
+    }),
+    [...preferences, foodPreference],
+  );
+
+  assert.equal(result.breakdown[0].score, 1);
+  assert.equal(result.breakdown[1].score, 1);
+  assert.equal(result.breakdown[2].score, 0);
+  assertClose(result.totalScore, 0.4);
 });
 
 test("gives full food coverage only when every selected label matches", () => {
