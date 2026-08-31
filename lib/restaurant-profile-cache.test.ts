@@ -28,6 +28,13 @@ const input: RestaurantProfileInput = {
 const profile: RestaurantApiProfile = {
   placeId: input.placeId,
   foodTypes: ["cafe_bakery"],
+  labelEvidence: [{
+    foodType: "cafe_bakery",
+    evidenceKind: "official_description",
+    sourceUrl: "https://example.com/cache-cafe",
+    reason: "The official site identifies the business as a cafe and bakery.",
+    mainEntries: [],
+  }],
   typeConfidence: "high",
   estimatedPriceMin: 10,
   estimatedPriceMax: 24,

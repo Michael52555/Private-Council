@@ -5,14 +5,15 @@ import {
   type FoodType,
   type RestaurantCandidate,
   type RestaurantFoodVector,
+  type RestaurantFoodTypeEvidence,
 } from "@/lib/planning-types";
 import {
   activeFoodTypes,
   buildRestaurantFoodVectorFromTypes,
 } from "@/lib/restaurant-food-vector";
 
-export const restaurantProfileSchemaVersion = 1;
-export const restaurantProfilePromptVersion = 2;
+export const restaurantProfileSchemaVersion = 2;
+export const restaurantProfilePromptVersion = 3;
 
 export type RestaurantProfileInput = {
   placeId: string;
@@ -28,6 +29,7 @@ export type RestaurantProfileInput = {
 export type RestaurantApiProfile = {
   placeId: string;
   foodTypes: FoodType[];
+  labelEvidence: RestaurantFoodTypeEvidence[];
   typeConfidence: Exclude<BudgetEstimateConfidence, "none">;
   estimatedPriceMin: number | null;
   estimatedPriceMax: number | null;
@@ -38,6 +40,62 @@ const foodTypeValues = new Set<string>(
   FOOD_TYPE_OPTIONS.map((option) => option.value),
 );
 const confidenceValues = new Set(["high", "medium", "low"]);
+const evidenceKindValues = new Set([
+  "official_menu",
+  "official_description",
+  "third_party_menu",
+  "other_web",
+]);
+
+function normalizedEvidenceUrl(value: unknown): string | null {
+  if (typeof value !== "string" || value.length > 2_048) return null;
+  try {
+    const url = new URL(value);
+    if (url.protocol !== "http:" && url.protocol !== "https:") return null;
+    url.hash = "";
+    return url.toString();
+  } catch {
+    return null;
+  }
+}
+
+function normalizedEvidenceText(value: unknown, maximumLength: number): string | null {
+  if (typeof value !== "string") return null;
+  const normalized = value.replace(/\s+/g, " ").trim();
+  if (!normalized || normalized.length > maximumLength) return null;
+  return normalized;
+}
+
+function parseLabelEvidence(value: unknown): RestaurantFoodTypeEvidence | null {
+  if (typeof value !== "object" || value === null) return null;
+  const evidence = value as Record<string, unknown>;
+  if (
+    typeof evidence.foodType !== "string" ||
+    !foodTypeValues.has(evidence.foodType) ||
+    typeof evidence.evidenceKind !== "string" ||
+    !evidenceKindValues.has(evidence.evidenceKind)
+  ) {
+    return null;
+  }
+  const sourceUrl = normalizedEvidenceUrl(evidence.sourceUrl);
+  const reason = normalizedEvidenceText(evidence.reason, 500);
+  if (!sourceUrl || !reason || !Array.isArray(evidence.mainEntries)) return null;
+
+  const mainEntries: string[] = [];
+  for (const rawEntry of evidence.mainEntries.slice(0, 8)) {
+    const entry = normalizedEvidenceText(rawEntry, 160);
+    if (!entry) return null;
+    if (!mainEntries.includes(entry)) mainEntries.push(entry);
+  }
+
+  return {
+    foodType: evidence.foodType as FoodType,
+    evidenceKind: evidence.evidenceKind as RestaurantFoodTypeEvidence["evidenceKind"],
+    sourceUrl,
+    reason,
+    mainEntries,
+  };
+}
 
 function normalizedMoney(value: unknown): number | null {
   if (typeof value !== "number" || !Number.isFinite(value)) return null;
@@ -67,6 +125,27 @@ export function parseRestaurantApiProfile(
     }
   }
 
+  if (!Array.isArray(profile.labelEvidence)) return null;
+  const labelEvidence: RestaurantFoodTypeEvidence[] = [];
+  for (const rawEvidence of profile.labelEvidence) {
+    const evidence = parseLabelEvidence(rawEvidence);
+    if (!evidence) continue;
+    if (
+      !labelEvidence.some((existing) => existing.foodType === evidence.foodType)
+    ) {
+      labelEvidence.push(evidence);
+    }
+  }
+  const evidencedFoodTypes = new Set(
+    labelEvidence.map((evidence) => evidence.foodType),
+  );
+  const supportedFoodTypes = foodTypes.filter((foodType) =>
+    evidencedFoodTypes.has(foodType)
+  );
+  const supportedEvidence = labelEvidence.filter((evidence) =>
+    supportedFoodTypes.includes(evidence.foodType)
+  );
+
   if (
     typeof profile.typeConfidence !== "string" ||
     !confidenceValues.has(profile.typeConfidence) ||
@@ -91,11 +170,52 @@ export function parseRestaurantApiProfile(
 
   return {
     placeId,
-    foodTypes,
+    foodTypes: supportedFoodTypes,
+    labelEvidence: supportedEvidence,
     typeConfidence: profile.typeConfidence as RestaurantApiProfile["typeConfidence"],
     estimatedPriceMin: minimum,
     estimatedPriceMax: maximum,
     priceConfidence: profile.priceConfidence as RestaurantApiProfile["priceConfidence"],
+  };
+}
+
+function comparableEvidenceUrl(value: string): string | null {
+  try {
+    const url = new URL(value);
+    return `${url.origin.toLowerCase()}${url.pathname.replace(/\/$/, "")}`;
+  } catch {
+    return null;
+  }
+}
+
+export function restrictRestaurantProfileToWebSources(
+  profile: RestaurantApiProfile,
+  sourceUrls: ReadonlySet<string>,
+): RestaurantApiProfile {
+  const comparableSources = new Set(
+    [...sourceUrls]
+      .map(comparableEvidenceUrl)
+      .filter((value): value is string => value !== null),
+  );
+  const labelEvidence = profile.labelEvidence.filter((evidence) => {
+    const comparable = comparableEvidenceUrl(evidence.sourceUrl);
+    return comparable !== null && comparableSources.has(comparable);
+  });
+  const evidencedFoodTypes = new Set(
+    labelEvidence.map((evidence) => evidence.foodType),
+  );
+  const foodTypes = profile.foodTypes.filter((foodType) =>
+    evidencedFoodTypes.has(foodType)
+  );
+
+  return {
+    ...profile,
+    foodTypes,
+    labelEvidence: labelEvidence.filter((evidence) =>
+      foodTypes.includes(evidence.foodType)
+    ),
+    typeConfidence:
+      foodTypes.length < profile.foodTypes.length ? "low" : profile.typeConfidence,
   };
 }
 
@@ -156,10 +276,9 @@ export function applyRestaurantProfile(
   const apiFoodVector = apiProfile
     ? buildRestaurantFoodVectorFromTypes(apiProfile.foodTypes)
     : null;
-  const shouldUseApiFood = Boolean(
-    apiProfile &&
-    (apiProfile.foodTypes.length > 0 || activeFoodTypes(fallbackFood.vector).length === 0),
-  );
+  // A successful API profile is authoritative even when it contains no food
+  // labels. Google types are used only when the API request truly failed.
+  const shouldUseApiFood = Boolean(apiProfile);
   const foodTypeVector = shouldUseApiFood && apiFoodVector
     ? apiFoodVector
     : fallbackFood.vector;
@@ -197,6 +316,9 @@ export function applyRestaurantProfile(
     foodTypeEstimateConfidence: shouldUseApiFood
       ? apiProfile!.typeConfidence
       : fallbackFood.confidence,
+    foodTypeEvidence: shouldUseApiFood
+      ? apiProfile!.labelEvidence
+      : [],
     estimatedPriceMin,
     estimatedPriceMax,
     pricePerPerson: midpoint,

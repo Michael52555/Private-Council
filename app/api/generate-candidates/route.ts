@@ -7,6 +7,10 @@ import { classifyRestaurantMealProfile } from "@/lib/menu/restaurant-profile";
 import { buildRestaurantFoodVector } from "@/lib/restaurant-food-vector";
 import { profileRestaurantCandidates } from "@/lib/restaurant-profiler";
 import {
+  mergeRestaurantCandidatePools,
+  restaurantCandidatePoolLimit,
+} from "@/lib/restaurant-candidate-pool";
+import {
   FOOD_TYPE_OPTIONS,
   type FoodType,
   type RestaurantCandidate,
@@ -52,7 +56,12 @@ type GoogleNearbySearchResponse = {
 };
 
 const googleNearbyResultLimit = 20;
-const restaurantCandidatePoolLimit = 24;
+const broadDiningGoogleTypes = [
+  "restaurant",
+  "cafe",
+  "bakery",
+  "coffee_shop",
+] as const;
 const foodTypeValues = new Set<string>(
   FOOD_TYPE_OPTIONS.map((option) => option.value),
 );
@@ -121,6 +130,7 @@ async function fetchNearbyPlaces(
   origin: GeocodedOrigin,
   radiusMeters: number,
   includedTypes: readonly string[],
+  rankPreference: "DISTANCE" | "POPULARITY",
 ): Promise<GoogleNearbyPlace[]> {
   const apiKey = process.env.GOOGLE_MAPS_API_KEY;
   if (!apiKey) throw new Error("GOOGLE_MAPS_API_KEY is not configured.");
@@ -138,7 +148,7 @@ async function fetchNearbyPlaces(
     body: JSON.stringify({
       includedTypes,
       maxResultCount: googleNearbyResultLimit,
-      rankPreference: "POPULARITY",
+      rankPreference,
       locationRestriction: {
         circle: {
           center: { latitude: origin.latitude, longitude: origin.longitude },
@@ -244,13 +254,25 @@ async function searchNearbyRestaurants(
   const preferredGoogleTypes = googleSearchTypesForFoodPreferences(
     preferredFoodTypes,
   );
+  const nearestSearch = fetchNearbyPlaces(
+    origin,
+    radiusMeters,
+    broadDiningGoogleTypes,
+    "DISTANCE",
+  );
   const generalSearch = fetchNearbyPlaces(
     origin,
     radiusMeters,
-    ["restaurant"],
+    broadDiningGoogleTypes,
+    "POPULARITY",
   );
   const preferenceSearch = preferredGoogleTypes.length > 0
-    ? fetchNearbyPlaces(origin, radiusMeters, preferredGoogleTypes).catch(
+    ? fetchNearbyPlaces(
+        origin,
+        radiusMeters,
+        preferredGoogleTypes,
+        "POPULARITY",
+      ).catch(
         (error) => {
           console.warn(
             "Preference-aware restaurant discovery failed; using the general pool:",
@@ -260,22 +282,22 @@ async function searchNearbyRestaurants(
         },
       )
     : Promise.resolve([]);
-  const [preferredPlaces, generalPlaces] = await Promise.all([
+  const [nearestPlaces, preferredPlaces, generalPlaces] = await Promise.all([
+    nearestSearch,
     preferenceSearch,
     generalSearch,
   ]);
 
-  const candidates: RestaurantCandidate[] = [];
-  const seenPlaceIds = new Set<string>();
-  for (const place of [...preferredPlaces, ...generalPlaces]) {
-    const candidate = candidateFromGooglePlace(place, origin);
-    if (!candidate || seenPlaceIds.has(candidate.id)) continue;
-    seenPlaceIds.add(candidate.id);
-    candidates.push(candidate);
-    if (candidates.length >= restaurantCandidatePoolLimit) break;
-  }
+  const convertPlaces = (places: readonly GoogleNearbyPlace[]) => places
+    .map((place) => candidateFromGooglePlace(place, origin))
+    .filter((candidate): candidate is RestaurantCandidate => candidate !== null);
 
-  return candidates;
+  return mergeRestaurantCandidatePools({
+    nearest: convertPlaces(nearestPlaces),
+    preferred: convertPlaces(preferredPlaces),
+    general: convertPlaces(generalPlaces),
+    limit: restaurantCandidatePoolLimit,
+  });
 }
 
 export async function POST(request: Request) {

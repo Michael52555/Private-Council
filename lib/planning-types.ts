@@ -135,6 +135,18 @@ export type FoodTypeEstimateSource =
   | "api_profile"
   | "google_types_fallback";
 
+export type RestaurantFoodTypeEvidence = {
+  foodType: FoodType;
+  evidenceKind:
+    | "official_menu"
+    | "official_description"
+    | "third_party_menu"
+    | "other_web";
+  sourceUrl: string;
+  reason: string;
+  mainEntries: string[];
+};
+
 export type RestaurantCandidate = CandidatePlan & {
   id: string;
   name: string;
@@ -158,6 +170,7 @@ export type RestaurantCandidate = CandidatePlan & {
   foodTypeVector: RestaurantFoodVector;
   foodTypeEstimateSource: FoodTypeEstimateSource;
   foodTypeEstimateConfidence: BudgetEstimateConfidence;
+  foodTypeEvidence?: RestaurantFoodTypeEvidence[];
   primaryType?: string;
   placeTypes: string[];
   priceLevel?: string;
