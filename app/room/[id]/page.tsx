@@ -1774,6 +1774,7 @@ export default function RoomPage() {
     );
 
 
+  const visibleRestaurantCandidateLimit = 20;
   const rankedCandidates =
   candidates
     .map((candidate) => {
@@ -1798,8 +1799,12 @@ export default function RoomPage() {
       }
       if (a.totalScore === null) return 1;
       if (b.totalScore === null) return -1;
-      return b.totalScore - a.totalScore;
-    });
+      return (
+        b.totalScore - a.totalScore ||
+        a.candidate.distanceMiles - b.candidate.distanceMiles
+      );
+    })
+    .slice(0, visibleRestaurantCandidateLimit);
 
   if (!hasLoaded) {
     return (
@@ -2228,7 +2233,9 @@ export default function RoomPage() {
 
                             <div className="flex items-center gap-3">
                                 <span className="rounded-full border border-white/10 bg-white/10 px-3 py-1 text-sm font-semibold text-gray-200">
-                                    {candidates.length} options
+                                    {candidates.length > rankedCandidates.length
+                                      ? `Top ${rankedCandidates.length} of ${candidates.length}`
+                                      : `${candidates.length} options`}
                                 </span>
 
                                 <button
