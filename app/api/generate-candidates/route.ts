@@ -8,17 +8,19 @@ import { buildRestaurantFoodVector } from "@/lib/restaurant-food-vector";
 import { profileRestaurantCandidates } from "@/lib/restaurant-profiler";
 import {
   mergeRestaurantCandidatePools,
+  preferenceSearchResultTarget,
   restaurantCandidatePoolLimit,
+  roundRobinRestaurantPools,
 } from "@/lib/restaurant-candidate-pool";
 import {
   FOOD_TYPE_OPTIONS,
+  foodTypeLabel,
   type FoodType,
   type RestaurantCandidate,
 } from "@/lib/planning-types";
-import { googleSearchTypesForFoodPreferences } from "@/lib/restaurant-search-types";
 
 export const runtime = "nodejs";
-export const maxDuration = 60;
+export const maxDuration = 120;
 
 type GeocodedOrigin = {
   formattedAddress: string;
@@ -35,7 +37,7 @@ type GoogleGeocodingResponse = {
   }>;
 };
 
-type GoogleNearbyPlace = {
+type GooglePlace = {
   id?: string;
   displayName?: { text?: string };
   formattedAddress?: string;
@@ -50,18 +52,15 @@ type GoogleNearbyPlace = {
   userRatingCount?: number;
 };
 
-type GoogleNearbySearchResponse = {
-  places?: GoogleNearbyPlace[];
+type GoogleTextSearchResponse = {
+  places?: GooglePlace[];
+  nextPageToken?: string;
   error?: { message?: string };
 };
 
-const googleNearbyResultLimit = 20;
-const broadDiningGoogleTypes = [
-  "restaurant",
-  "cafe",
-  "bakery",
-  "coffee_shop",
-] as const;
+const googleTextSearchPageSize = 20;
+const googleTextSearchMaximumPages = 3;
+const nearestSearchResultTarget = 60;
 const foodTypeValues = new Set<string>(
   FOOD_TYPE_OPTIONS.map((option) => option.value),
 );
@@ -123,54 +122,99 @@ function calculateDistanceMiles(
       Math.sin(longitudeDifference / 2) ** 2;
   const angularDistance =
     2 * Math.atan2(Math.sqrt(haversineValue), Math.sqrt(1 - haversineValue));
-  return Math.round(3958.8 * angularDistance * 10) / 10;
+  return 3958.8 * angularDistance;
 }
 
-async function fetchNearbyPlaces(
-  origin: GeocodedOrigin,
-  radiusMeters: number,
-  includedTypes: readonly string[],
-  rankPreference: "DISTANCE" | "POPULARITY",
-): Promise<GoogleNearbyPlace[]> {
+function textSearchRectangle(origin: GeocodedOrigin, radiusMeters: number) {
+  const latitudeDelta = radiusMeters / 111_320;
+  const longitudeScale = Math.max(
+    Math.abs(Math.cos(degreesToRadians(origin.latitude))),
+    0.01,
+  );
+  const longitudeDelta = radiusMeters / (111_320 * longitudeScale);
+  return {
+    low: {
+      latitude: Math.max(-90, origin.latitude - latitudeDelta),
+      longitude: Math.max(-180, origin.longitude - longitudeDelta),
+    },
+    high: {
+      latitude: Math.min(90, origin.latitude + latitudeDelta),
+      longitude: Math.min(180, origin.longitude + longitudeDelta),
+    },
+  };
+}
+
+async function fetchTextSearchPlaces({
+  origin,
+  radiusMeters,
+  textQuery,
+  rankPreference,
+  includedType,
+  targetCount,
+}: {
+  origin: GeocodedOrigin;
+  radiusMeters: number;
+  textQuery: string;
+  rankPreference: "DISTANCE" | "RELEVANCE";
+  includedType?: string;
+  targetCount: number;
+}): Promise<GooglePlace[]> {
   const apiKey = process.env.GOOGLE_MAPS_API_KEY;
   if (!apiKey) throw new Error("GOOGLE_MAPS_API_KEY is not configured.");
 
-  const response = await fetch("https://places.googleapis.com/v1/places:searchNearby", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "X-Goog-Api-Key": apiKey,
-      "X-Goog-FieldMask":
-        "places.id,places.displayName,places.formattedAddress,places.location," +
-        "places.websiteUri,places.googleMapsUri,places.priceLevel,places.rating," +
-        "places.priceRange,places.userRatingCount,places.primaryType,places.types",
-    },
-    body: JSON.stringify({
-      includedTypes,
-      maxResultCount: googleNearbyResultLimit,
-      rankPreference,
-      locationRestriction: {
-        circle: {
-          center: { latitude: origin.latitude, longitude: origin.longitude },
-          radius: radiusMeters,
-        },
+  const places: GooglePlace[] = [];
+  let pageToken: string | undefined;
+  for (
+    let page = 0;
+    page < googleTextSearchMaximumPages && places.length < targetCount;
+    page += 1
+  ) {
+    const response = await fetch("https://places.googleapis.com/v1/places:searchText", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Goog-Api-Key": apiKey,
+        "X-Goog-FieldMask":
+          "places.id,places.displayName,places.formattedAddress,places.location," +
+          "places.websiteUri,places.googleMapsUri,places.priceLevel,places.rating," +
+          "places.priceRange,places.userRatingCount,places.primaryType,places.types," +
+          "nextPageToken",
       },
-    }),
-    cache: "no-store",
-  });
+      body: JSON.stringify({
+        textQuery,
+        pageSize: googleTextSearchPageSize,
+        rankPreference,
+        ...(includedType
+          ? { includedType, strictTypeFiltering: true }
+          : {}),
+        locationRestriction: {
+          rectangle: textSearchRectangle(origin, radiusMeters),
+        },
+        ...(pageToken ? { pageToken } : {}),
+      }),
+      cache: "no-store",
+    });
 
-  const data = (await response.json()) as GoogleNearbySearchResponse;
-  if (!response.ok) {
-    throw new Error(
-      data.error?.message ?? `Nearby restaurant search failed with status ${response.status}.`,
-    );
+    const data = (await response.json()) as GoogleTextSearchResponse;
+    if (!response.ok) {
+      const error = new Error(
+        data.error?.message ?? `Restaurant text search failed with status ${response.status}.`,
+      );
+      if (places.length === 0) throw error;
+      console.warn("A later restaurant search page failed; keeping earlier results:", error);
+      break;
+    }
+
+    places.push(...(data.places ?? []));
+    pageToken = data.nextPageToken;
+    if (!pageToken) break;
   }
 
-  return data.places ?? [];
+  return places.slice(0, targetCount);
 }
 
 function candidateFromGooglePlace(
-  place: GoogleNearbyPlace,
+  place: GooglePlace,
   origin: GeocodedOrigin,
 ): RestaurantCandidate | null {
   const id = place.id;
@@ -201,48 +245,50 @@ function candidateFromGooglePlace(
     placeTypes,
   });
   return {
-      id,
-      name,
-      address: place.formattedAddress ?? "Address unavailable",
-      distanceMiles: calculateDistanceMiles(
-        origin.latitude,
-        origin.longitude,
-        latitude,
-        longitude,
-      ),
-      // Google pricing is retained only as a final fallback. It must not be
-      // promoted to the active estimate before menu enrichment has finished.
-      pricePerPerson: null,
-      estimatedPriceMin: null,
-      estimatedPriceMax: null,
-      googleEstimatedPriceMin: googleBudget.minimum,
-      googleEstimatedPriceMax: googleBudget.maximum,
-      googleEstimatedPriceMidpoint: googleBudget.midpoint,
-      googleBudgetEstimateSource: googleBudget.source,
-      googleBudgetEstimateConfidence: googleBudget.confidence,
-      googleBudgetEstimateCurrency: googleBudget.currency,
-      budgetEstimateSource: "unavailable",
-      budgetEstimateConfidence: "none",
-      budgetEstimateCurrency: null,
-      menuStatus: "pending",
-      menuItemCount: 0,
-      restaurantMealProfile,
-      foodTypeVector: buildRestaurantFoodVector({
-        primaryType: place.primaryType,
-        placeTypes,
-      }),
-      foodTypeEstimateSource: "google_types_fallback",
-      foodTypeEstimateConfidence: place.primaryType || placeTypes.length > 0
-        ? "medium"
-        : "low",
+    id,
+    name,
+    address: place.formattedAddress ?? "Address unavailable",
+    distanceMiles: Math.round(
+      calculateDistanceMiles(
+          origin.latitude,
+          origin.longitude,
+          latitude,
+          longitude,
+        ) * 10,
+    ) / 10,
+    // Google pricing is retained only as a final fallback. It must not be
+    // promoted to the active estimate before menu enrichment has finished.
+    pricePerPerson: null,
+    estimatedPriceMin: null,
+    estimatedPriceMax: null,
+    googleEstimatedPriceMin: googleBudget.minimum,
+    googleEstimatedPriceMax: googleBudget.maximum,
+    googleEstimatedPriceMidpoint: googleBudget.midpoint,
+    googleBudgetEstimateSource: googleBudget.source,
+    googleBudgetEstimateConfidence: googleBudget.confidence,
+    googleBudgetEstimateCurrency: googleBudget.currency,
+    budgetEstimateSource: "unavailable",
+    budgetEstimateConfidence: "none",
+    budgetEstimateCurrency: null,
+    menuStatus: "pending",
+    menuItemCount: 0,
+    restaurantMealProfile,
+    foodTypeVector: buildRestaurantFoodVector({
       primaryType: place.primaryType,
       placeTypes,
-      priceLevel: place.priceLevel,
-      rating: place.rating,
-      userRatingCount: place.userRatingCount,
-      websiteUri: place.websiteUri,
-      googleMapsUri: place.googleMapsUri,
-      orderingSources: [],
+    }),
+    foodTypeEstimateSource: "google_types_fallback",
+    foodTypeEstimateConfidence: place.primaryType || placeTypes.length > 0
+      ? "medium"
+      : "low",
+    primaryType: place.primaryType,
+    placeTypes,
+    priceLevel: place.priceLevel,
+    rating: place.rating,
+    userRatingCount: place.userRatingCount,
+    websiteUri: place.websiteUri,
+    googleMapsUri: place.googleMapsUri,
+    orderingSources: [],
   };
 }
 
@@ -251,51 +297,82 @@ async function searchNearbyRestaurants(
   radiusMeters: number,
   preferredFoodTypes: readonly FoodType[],
 ): Promise<RestaurantCandidate[]> {
-  const preferredGoogleTypes = googleSearchTypesForFoodPreferences(
-    preferredFoodTypes,
-  );
-  const nearestSearch = fetchNearbyPlaces(
+  const nearestSearch = fetchTextSearchPlaces({
     origin,
     radiusMeters,
-    broadDiningGoogleTypes,
-    "DISTANCE",
+    textQuery: "restaurants",
+    rankPreference: "DISTANCE",
+    includedType: "restaurant",
+    targetCount: nearestSearchResultTarget,
+  });
+  const preferenceTarget = preferenceSearchResultTarget(
+    preferredFoodTypes.length,
   );
-  const generalSearch = fetchNearbyPlaces(
-    origin,
-    radiusMeters,
-    broadDiningGoogleTypes,
-    "POPULARITY",
+  const preferenceSearches = preferredFoodTypes.map((foodType) =>
+    fetchTextSearchPlaces({
+      origin,
+      radiusMeters,
+      textQuery: `${foodTypeLabel(foodType)} restaurants`,
+      rankPreference: "RELEVANCE",
+      // Generic discovery is strictly restaurants. Coffee shops and bakeries
+      // are eligible only when the user explicitly selected Café & bakery.
+      includedType: foodType === "cafe_bakery" ? undefined : "restaurant",
+      targetCount: preferenceTarget,
+    }).catch((error) => {
+      console.warn(
+        `Preference-aware restaurant discovery failed for ${foodType}:`,
+        error,
+      );
+      return [];
+    }),
   );
-  const preferenceSearch = preferredGoogleTypes.length > 0
-    ? fetchNearbyPlaces(
+  const fallbackPreferenceSearch = preferredFoodTypes.length === 0
+    ? fetchTextSearchPlaces({
         origin,
         radiusMeters,
-        preferredGoogleTypes,
-        "POPULARITY",
-      ).catch(
-        (error) => {
-          console.warn(
-            "Preference-aware restaurant discovery failed; using the general pool:",
-            error,
-          );
-          return [];
-        },
-      )
+        textQuery: "popular restaurants",
+        rankPreference: "RELEVANCE",
+        includedType: "restaurant",
+        targetCount: nearestSearchResultTarget,
+      }).catch((error) => {
+        console.warn("General restaurant discovery failed:", error);
+        return [];
+      })
     : Promise.resolve([]);
-  const [nearestPlaces, preferredPlaces, generalPlaces] = await Promise.all([
+  const [
+    nearestPlaces,
+    preferencePlacePools,
+    fallbackPreferencePlaces,
+  ] = await Promise.all([
     nearestSearch,
-    preferenceSearch,
-    generalSearch,
+    Promise.all(preferenceSearches),
+    fallbackPreferenceSearch,
   ]);
 
-  const convertPlaces = (places: readonly GoogleNearbyPlace[]) => places
+  const radiusMiles = radiusMeters / 1609.344;
+  const convertPlaces = (places: readonly GooglePlace[]) => places
+    .filter((place) => {
+      const latitude = place.location?.latitude;
+      const longitude = place.location?.longitude;
+      return typeof latitude === "number"
+        && typeof longitude === "number"
+        && calculateDistanceMiles(
+          origin.latitude,
+          origin.longitude,
+          latitude,
+          longitude,
+        ) <= radiusMiles;
+    })
     .map((place) => candidateFromGooglePlace(place, origin))
     .filter((candidate): candidate is RestaurantCandidate => candidate !== null);
+  const preferredPlaces = preferredFoodTypes.length > 0
+    ? roundRobinRestaurantPools(preferencePlacePools)
+    : fallbackPreferencePlaces;
 
   return mergeRestaurantCandidatePools({
     nearest: convertPlaces(nearestPlaces),
     preferred: convertPlaces(preferredPlaces),
-    general: convertPlaces(generalPlaces),
+    general: [],
     limit: restaurantCandidatePoolLimit,
   });
 }

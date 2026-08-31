@@ -13,7 +13,10 @@ import {
   storeRestaurantProfileCacheBatch,
 } from "@/lib/restaurant-profile-cache";
 
-const profileWorkerCount = 8;
+// A 100-candidate pool is processed in bounded waves. Per-item failures still
+// fall back independently, so one slow or unavailable profile cannot block the
+// entire recommendation set indefinitely.
+const profileWorkerCount = 20;
 const profileRequestTimeoutMs = 15_000;
 const foodStickerDictionary = FOOD_TYPE_OPTIONS.map((option) => ({
   value: option.value,

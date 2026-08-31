@@ -2,9 +2,32 @@ type RestaurantCandidateIdentity = {
   id: string;
 };
 
-export const nearestRestaurantCandidateQuota = 12;
-export const preferredRestaurantCandidateQuota = 12;
-export const restaurantCandidatePoolLimit = 24;
+export const nearestRestaurantCandidateQuota = 50;
+export const preferredRestaurantCandidateQuota = 50;
+export const restaurantCandidatePoolLimit = 100;
+
+const googleTextSearchPageSize = 20;
+const googleTextSearchMaximumResults = 60;
+
+export function preferenceSearchResultTarget(preferenceCount: number): number {
+  if (preferenceCount <= 0) return 0;
+  return Math.min(
+    googleTextSearchMaximumResults,
+    Math.max(googleTextSearchPageSize, Math.ceil(75 / preferenceCount)),
+  );
+}
+
+export function roundRobinRestaurantPools<T>(pools: readonly (readonly T[])[]): T[] {
+  const merged: T[] = [];
+  const maximumPoolLength = Math.max(0, ...pools.map((pool) => pool.length));
+  for (let index = 0; index < maximumPoolLength; index += 1) {
+    for (const pool of pools) {
+      const candidate = pool[index];
+      if (candidate !== undefined) merged.push(candidate);
+    }
+  }
+  return merged;
+}
 
 type RestaurantCandidatePools<T extends RestaurantCandidateIdentity> = {
   nearest: readonly T[];
